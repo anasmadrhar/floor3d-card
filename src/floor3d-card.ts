@@ -10,8 +10,8 @@ import {
 } from 'custom-card-helpers'; // This is a community maintained npm module with common helper functions/types
 import './editor';
 import { HassEntity } from 'home-assistant-js-websocket';
-import { createConfigArray, createObjectGroupConfigArray, getLovelace } from './helpers';
-import type { Floor3dCardConfig } from './types';
+import { createConfigArray, createObjectGroupConfigArray, getLovelace, evaluateCondition } from './helpers';
+import type { Floor3dCardConfig, MarkerConfig, RoomControlConfig } from './types';
 import { CARD_VERSION } from './const';
 import { localize } from './localize/localize';
 //import three.js libraries for 3D rendering
@@ -131,6 +131,11 @@ export class Floor3dCard extends LitElement {
   _helper: THREE.DirectionalLightHelper;
   private _modelready: boolean;
   private _maxtextureimage: number;
+
+  // --- Marker / room-control overlay system ---
+  private _markerOverlay?: HTMLDivElement;
+  private _markerElements: Map<string, HTMLElement> = new Map();
+  private _roomControlElements: Map<string, HTMLElement> = new Map();
 
   constructor() {
     super();
@@ -557,6 +562,7 @@ export class Floor3dCard extends LitElement {
       //console.log(this._renderer.info);
     }
     this._renderer.render(this._scene, this._camera);
+    this._updateOverlayPositions();
   }
 
   private _getintersect(e: any): THREE.Intersection[] {
@@ -1106,6 +1112,12 @@ export class Floor3dCard extends LitElement {
           if (torerender) {
             this._render();
           }
+          // Update markers and room controls regardless of whether the
+          // primary entity bindings changed, because their visibility
+          // conditions may reference different entities.
+          if (this._markerOverlay) {
+            this._updateMarkersAndControls(hass);
+          }
         }
       }
     } catch (e) {
@@ -1492,6 +1504,8 @@ export class Floor3dCard extends LitElement {
       this._initAmbient();
 
       this._getOverlay();
+
+      this._initMarkerOverlay();
 
       this._manageZoom();
 
@@ -3231,6 +3245,7 @@ export class Floor3dCard extends LitElement {
 
     this._renderer.shadowMap.needsUpdate = true;
     this._renderer.render(this._scene, this._camera);
+    this._updateOverlayPositions();
   }
 
   // https://lit-element.polymer-project.org/guide/templates
@@ -3276,6 +3291,331 @@ export class Floor3dCard extends LitElement {
     });
 
     return html`${errorCard}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Marker / Room-Control Overlay System
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Create the transparent overlay div that sits on top of the Three.js canvas.
+   * Markers and room controls are rendered as HTML elements inside this overlay.
+   */
+  private _initMarkerOverlay(): void {
+    if (!this._content) return;
+    if (this._markerOverlay) {
+      this._markerOverlay.remove();
+    }
+
+    this._markerOverlay = document.createElement('div');
+    this._markerOverlay.style.cssText =
+      'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden;';
+    this._content.style.position = 'relative';
+    this._content.appendChild(this._markerOverlay);
+
+    this._markerElements.clear();
+    this._roomControlElements.clear();
+
+    // Build marker elements
+    if (this._config.markers) {
+      for (const marker of this._config.markers) {
+        const el = this._createMarkerElement(marker);
+        this._markerOverlay.appendChild(el);
+        this._markerElements.set(marker.id, el);
+      }
+    }
+
+    // Build room control elements
+    if (this._config.room_controls) {
+      for (const control of this._config.room_controls) {
+        const el = this._createRoomControlElement(control);
+        this._markerOverlay.appendChild(el);
+        this._roomControlElements.set(control.id, el);
+      }
+    }
+  }
+
+  /**
+   * Create the HTML element for a single marker.
+   */
+  private _createMarkerElement(marker: MarkerConfig): HTMLElement {
+    const size = marker.size || 48;
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `position:absolute;width:${size}px;height:${size}px;transform:translate(-50%,-50%);display:none;pointer-events:auto;cursor:pointer;`;
+    wrapper.dataset.markerId = marker.id;
+
+    // Inner content depending on marker type
+    if (marker.type === 'avatar' && marker.image) {
+      const img = document.createElement('img');
+      img.src = marker.image;
+      img.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;border:2px solid ${marker.color || 'white'};box-shadow:0 2px 8px rgba(0,0,0,0.5);`;
+      img.alt = marker.label || marker.id;
+      wrapper.appendChild(img);
+    } else if (marker.type === 'icon') {
+      const icon = document.createElement('ha-icon');
+      (icon as any).icon = marker.icon || 'mdi:account';
+      icon.style.cssText = `width:${size}px;height:${size}px;color:${marker.color || 'white'};filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));`;
+      wrapper.appendChild(icon);
+    } else if (marker.type === 'dot') {
+      const dot = document.createElement('div');
+      dot.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;background:${marker.color || '#4caf50'};border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.5);`;
+      wrapper.appendChild(dot);
+    } else {
+      // badge — icon + optional label pill
+      const badge = document.createElement('div');
+      badge.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:2px;`;
+      const icon = document.createElement('ha-icon');
+      (icon as any).icon = marker.icon || 'mdi:account';
+      icon.style.cssText = `width:${size}px;height:${size}px;color:${marker.color || 'white'};filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));`;
+      badge.appendChild(icon);
+      if (marker.label) {
+        const lbl = document.createElement('div');
+        lbl.textContent = marker.label;
+        lbl.style.cssText =
+          'background:rgba(0,0,0,0.65);color:white;font-size:11px;padding:1px 5px;border-radius:8px;white-space:nowrap;';
+        badge.appendChild(lbl);
+      }
+      wrapper.appendChild(badge);
+    }
+
+    // Tooltip
+    if (marker.label) {
+      wrapper.title = marker.label;
+    }
+
+    // Click action
+    const action = marker.action || 'more-info';
+    if (action === 'more-info') {
+      wrapper.addEventListener('click', () => {
+        if (this._hass) {
+          fireEvent(this, 'hass-more-info', { entityId: marker.entity });
+        }
+      });
+    }
+
+    return wrapper;
+  }
+
+  /**
+   * Create the HTML element for a single room control.
+   */
+  private _createRoomControlElement(control: RoomControlConfig): HTMLElement {
+    const size = control.size || 40;
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `position:absolute;width:${size}px;height:${size}px;transform:translate(-50%,-50%);display:none;pointer-events:auto;cursor:pointer;`;
+    wrapper.dataset.controlId = control.id;
+
+    const inner = document.createElement('div');
+    inner.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);`;
+
+    if (control.icon) {
+      const icon = document.createElement('ha-icon');
+      (icon as any).icon = control.icon;
+      icon.style.cssText = `width:${size * 0.6}px;height:${size * 0.6}px;color:white;`;
+      inner.appendChild(icon);
+    }
+
+    if (control.label) {
+      wrapper.title = control.label;
+    }
+
+    wrapper.appendChild(inner);
+
+    // Click action
+    wrapper.addEventListener('click', () => {
+      if (!this._hass) return;
+      switch (control.control_type) {
+        case 'toggle':
+          this._hass.callService(control.entity.split('.')[0], 'toggle', { entity_id: control.entity });
+          break;
+        case 'more-info':
+          fireEvent(this, 'hass-more-info', { entityId: control.entity });
+          break;
+        case 'service-call':
+          if (control.service) {
+            const [domain, service] = control.service.split('.');
+            this._hass.callService(domain, service, { entity_id: control.entity, ...(control.service_data || {}) });
+          }
+          break;
+        case 'media-toggle':
+          this._hass.callService('media_player', 'media_play_pause', { entity_id: control.entity });
+          break;
+        default:
+          fireEvent(this, 'hass-more-info', { entityId: control.entity });
+      }
+    });
+
+    return wrapper;
+  }
+
+  /**
+   * Project a world-space position to 2D screen coordinates.
+   * Returns { x, y } in pixels relative to the canvas container, and
+   * `behind` = true if the point is behind the camera.
+   */
+  private _projectToScreen(worldPos: THREE.Vector3): { x: number; y: number; behind: boolean } {
+    if (!this._camera || !this._content) return { x: 0, y: 0, behind: true };
+
+    const ndc = worldPos.clone().project(this._camera);
+    const behind = ndc.z > 1;
+    const x = ((ndc.x + 1) / 2) * this._content.clientWidth;
+    const y = ((-ndc.y + 1) / 2) * this._content.clientHeight;
+    return { x, y, behind };
+  }
+
+  /**
+   * Get the world-space center of a named scene object, optionally shifted up
+   * by z_offset (in model units).
+   */
+  private _getAnchorWorldPos(objectId: string, zOffset = 0): THREE.Vector3 | null {
+    if (!this._scene) return null;
+    const obj = this._scene.getObjectByName(objectId);
+    if (!obj) return null;
+
+    const box = new THREE.Box3().setFromObject(obj);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    if (zOffset !== 0) center.y += zOffset;
+    return center;
+  }
+
+  /**
+   * Update the 2D positions of all overlay elements based on their 3D anchors.
+   * Called after every render so elements stay locked to the scene.
+   */
+  private _updateOverlayPositions(): void {
+    if (!this._markerOverlay || !this._camera) return;
+
+    // Markers
+    if (this._config.markers) {
+      for (const marker of this._config.markers) {
+        const el = this._markerElements.get(marker.id);
+        if (!el || el.style.display === 'none') continue;
+
+        const anchorId = el.dataset.currentAnchor;
+        if (!anchorId) continue;
+
+        const worldPos = this._getAnchorWorldPos(anchorId, marker.z_offset || 0);
+        if (!worldPos) continue;
+
+        const { x, y, behind } = this._projectToScreen(worldPos);
+        if (behind) {
+          el.style.opacity = '0';
+        } else {
+          el.style.opacity = '1';
+          el.style.left = `${x}px`;
+          el.style.top = `${y}px`;
+        }
+      }
+    }
+
+    // Room controls
+    if (this._config.room_controls) {
+      for (const control of this._config.room_controls) {
+        const el = this._roomControlElements.get(control.id);
+        if (!el || el.style.display === 'none') continue;
+
+        const worldPos = this._getAnchorWorldPos(control.anchor, control.z_offset || 0);
+        if (!worldPos) continue;
+
+        const { x, y, behind } = this._projectToScreen(worldPos);
+        if (behind) {
+          el.style.opacity = '0';
+        } else {
+          el.style.opacity = '1';
+          el.style.left = `${x}px`;
+          el.style.top = `${y}px`;
+        }
+      }
+    }
+  }
+
+  /**
+   * Update visibility and state for all markers and room controls based on
+   * the current hass state. Called on every hass update.
+   */
+  private _updateMarkersAndControls(hass: HomeAssistant): void {
+    if (!this._markerOverlay) return;
+
+    // --- Markers ---
+    if (this._config.markers) {
+      for (const marker of this._config.markers) {
+        const el = this._markerElements.get(marker.id);
+        if (!el) continue;
+
+        // Evaluate overall visibility condition
+        let visible = true;
+        if (marker.visible_when) {
+          visible = evaluateCondition(hass, marker.visible_when);
+        }
+
+        // Get current room from entity state
+        const entityState = hass.states[marker.entity];
+        const currentRoom = entityState ? entityState.state : null;
+
+        // Check hide_states
+        if (visible && currentRoom && marker.hide_states) {
+          if (marker.hide_states.includes(currentRoom)) {
+            visible = false;
+          }
+        }
+
+        // Find anchor for current room
+        const anchorId = currentRoom && marker.rooms ? marker.rooms[currentRoom] : null;
+
+        if (!visible || !anchorId) {
+          el.style.display = 'none';
+          el.dataset.currentAnchor = '';
+        } else {
+          el.style.display = 'block';
+          el.dataset.currentAnchor = anchorId;
+          // Immediately update position
+          const worldPos = this._getAnchorWorldPos(anchorId, marker.z_offset || 0);
+          if (worldPos) {
+            const { x, y, behind } = this._projectToScreen(worldPos);
+            el.style.opacity = behind ? '0' : '1';
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+          }
+        }
+      }
+    }
+
+    // --- Room controls ---
+    if (this._config.room_controls) {
+      for (const control of this._config.room_controls) {
+        const el = this._roomControlElements.get(control.id);
+        if (!el) continue;
+
+        // Evaluate visibility condition
+        let visible = true;
+        if (control.visible_when) {
+          visible = evaluateCondition(hass, control.visible_when);
+        }
+
+        el.style.display = visible ? 'block' : 'none';
+
+        if (visible) {
+          // Update icon color based on entity state
+          const entityState = hass.states[control.entity];
+          const state = entityState ? entityState.state : null;
+          const inner = el.querySelector('div') as HTMLElement;
+          if (inner) {
+            const isOn = state === 'on' || state === 'playing' || state === 'open';
+            const color = isOn ? (control.color_on || 'rgba(255,200,50,0.85)') : (control.color_off || 'rgba(0,0,0,0.5)');
+            inner.style.background = color;
+            // Update icon color too
+            const icon = inner.querySelector('ha-icon') as HTMLElement;
+            if (icon) {
+              icon.style.color = isOn ? '#fff' : 'rgba(255,255,255,0.5)';
+            }
+          }
+        }
+      }
+    }
+
+    // After updating visibility, sync overlay positions
+    this._updateOverlayPositions();
   }
 
   // https://lit-element.polymer-project.org/guide/styles
