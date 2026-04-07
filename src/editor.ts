@@ -28,6 +28,8 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   private _entityOptionsArray: object[] = [];
   private _entityOptionsGroupArray: object[] = [];
   private _entityOptionsZoomArray: object[] = [];
+  private _markerOptionsArray: any[] = [];
+  private _roomControlOptionsArray: any[] = [];
   private _options: any;
   private _initialized = false;
   private _objects: any;
@@ -87,6 +89,18 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     this._config.object_groups = this._configObjectArray;
     this._config.entities = this._configArray;
     this._config.zoom_areas = this._configZoomArray;
+
+    // Initialize markers/room_controls if missing
+    if (!this._config.markers) {
+      this._config.markers = [];
+    }
+    if (!this._config.room_controls) {
+      this._config.room_controls = [];
+    }
+
+    // Build per-item options arrays (for expand/collapse state)
+    this._markerOptionsArray = (this._config.markers || []).map(() => ({ show: false }));
+    this._roomControlOptionsArray = (this._config.room_controls || []).map(() => ({ show: false }));
 
     //console.log(JSON.stringify(this._config));
 
@@ -298,6 +312,18 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
           secondary: 'Customize the overlay appearance and behavior settings',
           show: false,
         },
+        markers: {
+          icon: 'account-marker',
+          name: 'Markers',
+          secondary: 'Person / pet / device presence markers.',
+          show: false,
+        },
+        room_controls: {
+          icon: 'remote',
+          name: 'Room Controls',
+          secondary: 'Anchored in-scene room controls (lights, media, etc.).',
+          show: false,
+        },
       };
     }
 
@@ -357,6 +383,7 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
       ${this._createModelElement()} ${this._createAppearanceElement()}
       ${show ? html` ${this._createOverlayElement()} ` : ``} ${this._createEntitiesElement()}
       ${this._createObjectGroupsElement()} ${this._createZoomAreasElement()}
+      ${this._createMarkersElement()} ${this._createRoomControlsElement()}
     `;
   }
 
@@ -2906,7 +2933,439 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     this._config.entities = this._configArray;
     this._config.object_groups = this._configObjectArray;
     this._config.zoom_areas = this._configZoomArray;
+    // markers and room_controls are updated in-place on their config objects
     fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Markers editor
+  // ---------------------------------------------------------------------------
+
+  private _addMarker(): void {
+    if (!this._config) return;
+    const newMarker = { id: `marker_${Date.now()}`, entity: '', type: 'avatar' as const, rooms: {}, hide_states: ['not_home'] };
+    const newArray = [...(this._config.markers || []), newMarker];
+    this._config = { ...this._config, markers: newArray };
+    this._markerOptionsArray = newArray.map((_, i) =>
+      i < this._markerOptionsArray.length ? this._markerOptionsArray[i] : { show: true }
+    );
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _removeMarker(ev): void {
+    if (!this._config) return;
+    const index = ev.target.index;
+    const newArray = [...(this._config.markers || [])];
+    newArray.splice(index, 1);
+    this._config = { ...this._config, markers: newArray };
+    this._markerOptionsArray.splice(index, 1);
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _markerFieldChanged(ev): void {
+    if (!this._config) return;
+    const target = ev.target;
+    const index: number = target.markerIndex;
+    const attr: string = target.configAttribute;
+    const markers = [...(this._config.markers || [])];
+    markers[index] = { ...markers[index], [attr]: target.value };
+    this._config = { ...this._config, markers };
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _markerRoomsChanged(ev): void {
+    if (!this._config) return;
+    const target = ev.target;
+    const index: number = target.markerIndex;
+    let roomsValue: any = {};
+    try {
+      // Accept YAML-ish "key: value" lines or JSON
+      const text: string = target.value || '';
+      if (text.trim().startsWith('{')) {
+        roomsValue = JSON.parse(text);
+      } else {
+        // Parse simple "key: value" lines
+        text.split('\n').forEach((line) => {
+          const match = line.match(/^\s*([^:]+):\s*(.+)\s*$/);
+          if (match) roomsValue[match[1].trim()] = match[2].trim();
+        });
+      }
+    } catch (e) {
+      return;
+    }
+    const markers = [...(this._config.markers || [])];
+    markers[index] = { ...markers[index], rooms: roomsValue };
+    this._config = { ...this._config, markers };
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _createMarkersElement(): TemplateResult {
+    if (!this.hass || !this._config) return html``;
+    const options = this._options.markers;
+    const markers = this._config.markers || [];
+
+    return html`
+      <div class="category" id="markers">
+        <div class="sub-category" @click=${this._toggleThing} .options=${options} .optionsTarget=${this._options}>
+          <div class="row">
+            <ha-icon .icon=${`mdi:${options.icon}`}></ha-icon>
+            <div class="title">${options.name}</div>
+            <ha-icon .icon=${options.show ? `mdi:chevron-up` : `mdi:chevron-down`} style="margin-left: auto;"></ha-icon>
+          </div>
+          <div class="secondary">${options.secondary}</div>
+        </div>
+        ${options.show
+          ? html`
+              <div class="card-options" style="display:flex;flex-direction:column;gap:8px;">
+                ${markers.map((marker, index) => this._createMarkerItemElement(marker, index))}
+                <ha-icon
+                  class="ha-icon-large"
+                  icon="mdi:plus"
+                  style="cursor:pointer;align-self:flex-start;"
+                  @click=${this._addMarker}
+                  title="Add marker"
+                ></ha-icon>
+              </div>
+            `
+          : ''}
+      </div>
+    `;
+  }
+
+  private _createMarkerItemElement(marker: any, index: number): TemplateResult {
+    const itemOptions = this._markerOptionsArray[index] || { show: false };
+    const roomsText = marker.rooms
+      ? Object.entries(marker.rooms)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('\n')
+      : '';
+    const hideStatesText = Array.isArray(marker.hide_states) ? marker.hide_states.join(', ') : '';
+
+    return html`
+      <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
+        <div
+          style="display:flex;align-items:center;cursor:pointer;"
+          @click=${this._toggleThing}
+          .options=${itemOptions}
+          .optionsTarget=${this._markerOptionsArray}
+        >
+          <ha-icon icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"></ha-icon>
+          <span style="margin-left:8px;font-weight:500;">${marker.id || `Marker ${index + 1}`}</span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;">${marker.entity || ''}</span>
+          <ha-icon
+            icon="mdi:delete"
+            style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
+            .index=${index}
+            @click=${this._removeMarker}
+            title="Remove"
+          ></ha-icon>
+        </div>
+        ${itemOptions.show
+          ? html`
+              <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+                <floor3d-textfield
+                  label="ID (unique)"
+                  fullwidth
+                  .value=${marker.id || ''}
+                  .configAttribute=${'id'}
+                  .markerIndex=${index}
+                  @input=${this._markerFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="HA Entity (e.g. input_select.anas_current_room)"
+                  fullwidth
+                  .value=${marker.entity || ''}
+                  .configAttribute=${'entity'}
+                  .markerIndex=${index}
+                  @input=${this._markerFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-select
+                  label="Type"
+                  .configAttribute=${'type'}
+                  .markerIndex=${index}
+                  .value=${marker.type || 'avatar'}
+                  @selected=${this._markerFieldChanged}
+                >
+                  <mwc-list-item value="avatar">Avatar (image)</mwc-list-item>
+                  <mwc-list-item value="icon">Icon (MDI)</mwc-list-item>
+                  <mwc-list-item value="dot">Dot</mwc-list-item>
+                  <mwc-list-item value="badge">Badge</mwc-list-item>
+                </floor3d-select>
+                <floor3d-textfield
+                  label="Label"
+                  fullwidth
+                  .value=${marker.label || ''}
+                  .configAttribute=${'label'}
+                  .markerIndex=${index}
+                  @input=${this._markerFieldChanged}
+                ></floor3d-textfield>
+                ${marker.type === 'avatar' || !marker.type
+                  ? html`
+                      <floor3d-textfield
+                        label="Image URL (for avatar, e.g. /local/avatars/anas.png)"
+                        fullwidth
+                        .value=${marker.image || ''}
+                        .configAttribute=${'image'}
+                        .markerIndex=${index}
+                        @input=${this._markerFieldChanged}
+                      ></floor3d-textfield>
+                    `
+                  : html`
+                      <floor3d-textfield
+                        label="Icon (e.g. mdi:account)"
+                        fullwidth
+                        .value=${marker.icon || ''}
+                        .configAttribute=${'icon'}
+                        .markerIndex=${index}
+                        @input=${this._markerFieldChanged}
+                      ></floor3d-textfield>
+                    `}
+                <floor3d-textfield
+                  label="Color (CSS, e.g. #4caf50)"
+                  fullwidth
+                  .value=${marker.color || ''}
+                  .configAttribute=${'color'}
+                  .markerIndex=${index}
+                  @input=${this._markerFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Size (px, default 48)"
+                  type="number"
+                  .value=${marker.size !== undefined ? String(marker.size) : ''}
+                  .configAttribute=${'size'}
+                  .markerIndex=${index}
+                  @input=${this._markerFieldChanged}
+                ></floor3d-textfield>
+                <div style="font-size:12px;opacity:0.7;margin-top:4px;">
+                  Room → Anchor mapping (one per line: <code>room_state: anchor_object_id</code>)
+                </div>
+                <textarea
+                  rows="6"
+                  style="width:100%;font-family:monospace;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid var(--divider-color,#ccc);border-radius:4px;"
+                  .markerIndex=${index}
+                  @change=${this._markerRoomsChanged}
+                >${roomsText}</textarea>
+                <floor3d-textfield
+                  label="Hide when states (comma-separated, e.g. not_home,unknown)"
+                  fullwidth
+                  .value=${hideStatesText}
+                  .configAttribute=${'_hide_states_text'}
+                  .markerIndex=${index}
+                  @input=${(ev) => {
+                    const markers = [...(this._config.markers || [])];
+                    markers[index] = {
+                      ...markers[index],
+                      hide_states: ev.target.value
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    };
+                    this._config = { ...this._config, markers };
+                    fireEvent(this, 'config-changed', { config: this._config });
+                  }}
+                ></floor3d-textfield>
+              </div>
+            `
+          : ''}
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Room controls editor
+  // ---------------------------------------------------------------------------
+
+  private _addRoomControl(): void {
+    if (!this._config) return;
+    const newControl = { id: `control_${Date.now()}`, entity: '', anchor: '', control_type: 'toggle' as const, icon: 'mdi:lightbulb' };
+    const newArray = [...(this._config.room_controls || []), newControl];
+    this._config = { ...this._config, room_controls: newArray };
+    this._roomControlOptionsArray = newArray.map((_, i) =>
+      i < this._roomControlOptionsArray.length ? this._roomControlOptionsArray[i] : { show: true }
+    );
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _removeRoomControl(ev): void {
+    if (!this._config) return;
+    const index = ev.target.index;
+    const newArray = [...(this._config.room_controls || [])];
+    newArray.splice(index, 1);
+    this._config = { ...this._config, room_controls: newArray };
+    this._roomControlOptionsArray.splice(index, 1);
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _roomControlFieldChanged(ev): void {
+    if (!this._config) return;
+    const target = ev.target;
+    const index: number = target.controlIndex;
+    const attr: string = target.configAttribute;
+    const controls = [...(this._config.room_controls || [])];
+    controls[index] = { ...controls[index], [attr]: target.value };
+    this._config = { ...this._config, room_controls: controls };
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _createRoomControlsElement(): TemplateResult {
+    if (!this.hass || !this._config) return html``;
+    const options = this._options.room_controls;
+    const controls = this._config.room_controls || [];
+
+    return html`
+      <div class="category" id="room_controls">
+        <div class="sub-category" @click=${this._toggleThing} .options=${options} .optionsTarget=${this._options}>
+          <div class="row">
+            <ha-icon .icon=${`mdi:${options.icon}`}></ha-icon>
+            <div class="title">${options.name}</div>
+            <ha-icon .icon=${options.show ? `mdi:chevron-up` : `mdi:chevron-down`} style="margin-left: auto;"></ha-icon>
+          </div>
+          <div class="secondary">${options.secondary}</div>
+        </div>
+        ${options.show
+          ? html`
+              <div class="card-options" style="display:flex;flex-direction:column;gap:8px;">
+                ${controls.map((control, index) => this._createRoomControlItemElement(control, index))}
+                <ha-icon
+                  class="ha-icon-large"
+                  icon="mdi:plus"
+                  style="cursor:pointer;align-self:flex-start;"
+                  @click=${this._addRoomControl}
+                  title="Add room control"
+                ></ha-icon>
+              </div>
+            `
+          : ''}
+      </div>
+    `;
+  }
+
+  private _createRoomControlItemElement(control: any, index: number): TemplateResult {
+    const itemOptions = this._roomControlOptionsArray[index] || { show: false };
+
+    return html`
+      <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
+        <div
+          style="display:flex;align-items:center;cursor:pointer;"
+          @click=${this._toggleThing}
+          .options=${itemOptions}
+          .optionsTarget=${this._roomControlOptionsArray}
+        >
+          <ha-icon icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"></ha-icon>
+          <span style="margin-left:8px;font-weight:500;">${control.id || `Control ${index + 1}`}</span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;">${control.entity || ''}</span>
+          <ha-icon
+            icon="mdi:delete"
+            style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
+            .index=${index}
+            @click=${this._removeRoomControl}
+            title="Remove"
+          ></ha-icon>
+        </div>
+        ${itemOptions.show
+          ? html`
+              <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+                <floor3d-textfield
+                  label="ID (unique)"
+                  fullwidth
+                  .value=${control.id || ''}
+                  .configAttribute=${'id'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="HA Entity (e.g. light.living_room)"
+                  fullwidth
+                  .value=${control.entity || ''}
+                  .configAttribute=${'entity'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Anchor (3D object name in model)"
+                  fullwidth
+                  .value=${control.anchor || ''}
+                  .configAttribute=${'anchor'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-select
+                  label="Control Type"
+                  .configAttribute=${'control_type'}
+                  .controlIndex=${index}
+                  .value=${control.control_type || 'toggle'}
+                  @selected=${this._roomControlFieldChanged}
+                >
+                  <mwc-list-item value="toggle">Toggle (on/off)</mwc-list-item>
+                  <mwc-list-item value="more-info">More Info</mwc-list-item>
+                  <mwc-list-item value="service-call">Service Call</mwc-list-item>
+                  <mwc-list-item value="media-toggle">Media Toggle</mwc-list-item>
+                </floor3d-select>
+                <floor3d-textfield
+                  label="Icon (e.g. mdi:lightbulb)"
+                  fullwidth
+                  .value=${control.icon || ''}
+                  .configAttribute=${'icon'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Label"
+                  fullwidth
+                  .value=${control.label || ''}
+                  .configAttribute=${'label'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Color when ON (CSS, e.g. rgba(255,200,50,0.85))"
+                  fullwidth
+                  .value=${control.color_on || ''}
+                  .configAttribute=${'color_on'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Color when OFF (CSS, e.g. rgba(0,0,0,0.5))"
+                  fullwidth
+                  .value=${control.color_off || ''}
+                  .configAttribute=${'color_off'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Room (label, optional)"
+                  fullwidth
+                  .value=${control.room || ''}
+                  .configAttribute=${'room'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Size (px, default 40)"
+                  type="number"
+                  .value=${control.size !== undefined ? String(control.size) : ''}
+                  .configAttribute=${'size'}
+                  .controlIndex=${index}
+                  @input=${this._roomControlFieldChanged}
+                ></floor3d-textfield>
+                ${control.control_type === 'service-call'
+                  ? html`
+                      <floor3d-textfield
+                        label="Service (e.g. light.toggle)"
+                        fullwidth
+                        .value=${control.service || ''}
+                        .configAttribute=${'service'}
+                        .controlIndex=${index}
+                        @input=${this._roomControlFieldChanged}
+                      ></floor3d-textfield>
+                    `
+                  : ''}
+              </div>
+            `
+          : ''}
+      </div>
+    `;
   }
 
   static get styles(): CSSResultGroup {

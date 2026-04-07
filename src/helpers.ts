@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { PropertyValues } from 'lit';
 import { HomeAssistant, LovelaceConfig } from 'custom-card-helpers';
-import { Floor3dCardConfig } from './types';
+import { Floor3dCardConfig, VisibilityCondition, VisibilityConditionLeaf, VisibilityConditionGroup } from './types';
 
 /**
  * Performs a deep merge of objects and returns new object. Does not modify
@@ -217,3 +217,68 @@ export const loadHaYamlEditor = async () => {
   const devToolsRouter = document.createElement("developer-tools-router");
   await (devToolsRouter as any)?.routerOptions?.routes?.service?.load?.();
 };
+
+// ---------------------------------------------------------------------------
+// Visibility condition evaluation
+// ---------------------------------------------------------------------------
+
+function _isLeaf(cond: VisibilityCondition): cond is VisibilityConditionLeaf {
+  return 'entity' in cond;
+}
+
+function _isGroup(cond: VisibilityCondition): cond is VisibilityConditionGroup {
+  return 'and' in cond || 'or' in cond;
+}
+
+/**
+ * Evaluates a visibility condition against the current hass state.
+ * Returns true if the condition passes (i.e. the item should be visible).
+ */
+export function evaluateCondition(hass: HomeAssistant, condition: VisibilityCondition): boolean {
+  if (!condition) return true;
+
+  if (_isLeaf(condition)) {
+    const leaf = condition as VisibilityConditionLeaf;
+    const entityState = hass.states[leaf.entity];
+    if (!entityState) return false;
+    const state = entityState.state;
+
+    if (leaf.state !== undefined && state !== leaf.state) return false;
+    if (leaf.state_not !== undefined && state === leaf.state_not) return false;
+    if (leaf.state_in !== undefined && !leaf.state_in.includes(state)) return false;
+    if (leaf.state_not_in !== undefined && leaf.state_not_in.includes(state)) return false;
+    return true;
+  }
+
+  if (_isGroup(condition)) {
+    const group = condition as VisibilityConditionGroup;
+    if (group.and) {
+      return group.and.every((child) => evaluateCondition(hass, child));
+    }
+    if (group.or) {
+      return group.or.some((child) => evaluateCondition(hass, child));
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Collects all entity IDs referenced in a condition tree.
+ * Used to know which entities to subscribe to for updates.
+ */
+export function collectConditionEntities(condition: VisibilityCondition): string[] {
+  if (!condition) return [];
+
+  if (_isLeaf(condition)) {
+    return [(condition as VisibilityConditionLeaf).entity];
+  }
+
+  if (_isGroup(condition)) {
+    const group = condition as VisibilityConditionGroup;
+    const children = group.and || group.or || [];
+    return children.flatMap((child) => collectConditionEntities(child));
+  }
+
+  return [];
+}
