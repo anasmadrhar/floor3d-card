@@ -277,7 +277,7 @@ export function collectConditionEntities(condition: VisibilityCondition): string
   if (_isGroup(condition)) {
     const group = condition as VisibilityConditionGroup;
     const children = group.and || group.or || [];
-    return children.flatMap((child) => collectConditionEntities(child));
+    return ([] as string[]).concat(...children.map((child) => collectConditionEntities(child)));
   }
 
   return [];
