@@ -537,7 +537,7 @@ export class Floor3dCard extends LitElement {
     if (this._card) {
       // Check for cached state from a recently disconnected instance (editor preview re-creation)
       const modelKey = `${this._config?.path || ''}|${this._config?.objfile || ''}|${this._config?.mtlfile || ''}`;
-      if (_floor3dCachedCard && _floor3dCachedCard.key === modelKey) {
+      if (_floor3dCachedCard && _floor3dCachedCard.key === modelKey && this._config) {
         const oldCard = _floor3dCachedCard.instance;
         _floor3dCachedCard = null;
 
@@ -3340,6 +3340,7 @@ export class Floor3dCard extends LitElement {
   // https://lit-element.polymer-project.org/guide/templates
 
   protected render(): TemplateResult | void {
+    if (!this._config) return html``;
     if (this._config.show_error) {
       return this._showError(localize('common.show_error'));
     }

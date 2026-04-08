@@ -397,6 +397,7 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   }
 
   protected render(): TemplateResult | void {
+    if (!this._config || !this._options) return html``;
     const show = this._config.overlay ? this._config.overlay == 'yes' : false;
     return html`
       <div class="sub-category" style="display: flex; flex-direction: row; align-items: left;">
