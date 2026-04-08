@@ -137,6 +137,10 @@ export class Floor3dCard extends LitElement {
   private _markerElements: Map<string, HTMLElement> = new Map();
   private _roomControlElements: Map<string, HTMLElement> = new Map();
 
+  // --- Mobile object-ID discovery (long-press) ---
+  private _discoverLongPressTimeout: any = null;
+  private _discoverTouchOrigin: { x: number; y: number; e: any } | null = null;
+
   constructor() {
     super();
 
@@ -666,7 +670,7 @@ export class Floor3dCard extends LitElement {
       const objectName = intersects[0].object.name;
 
       if (getLovelace().editMode && this._config.editModeNotifications != 'no') {
-        window.prompt('Object:', objectName);
+        this._copyToClipboardAndToast(objectName, 'Object ID');
       }
       console.log('Object:', objectName);
 
@@ -740,7 +744,7 @@ export class Floor3dCard extends LitElement {
         this._controls.target.z +
         ' }';
       if (getLovelace().editMode && this._config.editModeNotifications != 'no') {
-        window.prompt('YAML:', cameraData);
+        this._copyToClipboardAndToast(cameraData, 'Camera YAML');
       }
       console.log('YAML:', cameraData);
     }
@@ -1470,6 +1474,11 @@ export class Floor3dCard extends LitElement {
       this._content.addEventListener('dblclick', this._performActionListener);
       this._content.addEventListener('touchstart', this._performActionListener);
       this._content.addEventListener('keydown', this._performActionListener);
+
+      // Long-press touch listeners for mobile object-ID discovery
+      this._content.addEventListener('touchstart', (e: TouchEvent) => this._discoverTouchStart(e), { passive: true });
+      this._content.addEventListener('touchmove', () => this._discoverTouchCancel(), { passive: true });
+      this._content.addEventListener('touchend', () => this._discoverTouchCancel(), { passive: true });
 
       this._setCamera();
 
@@ -3294,6 +3303,96 @@ export class Floor3dCard extends LitElement {
   }
 
   // ---------------------------------------------------------------------------
+  // Object ID discovery helpers (edit mode)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns all named object IDs present in the loaded 3D scene.
+   * Called by the editor to populate autocomplete for anchor fields.
+   */
+  public getObjectIds(): string[] {
+    if (!this._scene) return [];
+    const ids = new Set<string>();
+    this._scene.traverse((obj) => {
+      if (obj.name && obj.name.trim() !== '') ids.add(obj.name);
+    });
+    return Array.from(ids).sort();
+  }
+
+  /** Show a brief toast notification over the card (replaces window.prompt for object/camera data). */
+  private _showToast(message: string, detail?: string): void {
+    const existing = this._card?.querySelector('.floor3d-toast') as HTMLElement;
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'floor3d-toast';
+    toast.style.cssText = [
+      'position:absolute;bottom:16px;left:50%;transform:translateX(-50%)',
+      'background:rgba(30,30,30,0.92);color:#fff;padding:10px 18px',
+      'border-radius:8px;font-size:13px;z-index:9999;pointer-events:none',
+      'max-width:90%;word-break:break-all;text-align:center',
+      'box-shadow:0 4px 12px rgba(0,0,0,0.4)',
+    ].join(';');
+
+    toast.innerHTML = `<strong>${message}</strong>${detail ? `<br><code style="font-size:11px;opacity:0.85">${detail}</code>` : ''}`;
+    (this._card || document.body).appendChild(toast);
+
+    // Fade out
+    setTimeout(() => {
+      toast.style.transition = 'opacity 0.4s';
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 450);
+    }, 2500);
+  }
+
+  private _discoverTouchStart(e: TouchEvent): void {
+    if (!this._modelready) return;
+    const t = e.touches[0];
+    this._discoverTouchOrigin = { x: t.clientX, y: t.clientY, e };
+    this._discoverLongPressTimeout = setTimeout(() => {
+      if (!this._discoverTouchOrigin) return;
+      this._discoverTouchCancel();
+      this._discoverObjectAtTouch(this._discoverTouchOrigin.e);
+    }, 700);
+  }
+
+  private _discoverTouchCancel(): void {
+    if (this._discoverLongPressTimeout) {
+      clearTimeout(this._discoverLongPressTimeout);
+      this._discoverLongPressTimeout = null;
+    }
+    this._discoverTouchOrigin = null;
+  }
+
+  private _discoverObjectAtTouch(e: any): void {
+    const intersects = this._getintersect(e.touches ? e.touches[0] : e);
+    if (intersects.length > 0 && intersects[0].object.name) {
+      const name = intersects[0].object.name;
+      this._copyToClipboardAndToast(name, 'Object ID');
+    } else {
+      // Show camera data on long-press on empty space
+      const cam = this._camera;
+      const tgt = this._controls.target;
+      const yaml =
+        `camera_position: { x: ${cam.position.x.toFixed(3)}, y: ${cam.position.y.toFixed(3)}, z: ${cam.position.z.toFixed(3)} }\n` +
+        `camera_rotate: { x: ${cam.rotation.x.toFixed(4)}, y: ${cam.rotation.y.toFixed(4)}, z: ${cam.rotation.z.toFixed(4)} }\n` +
+        `camera_target: { x: ${tgt.x.toFixed(3)}, y: ${tgt.y.toFixed(3)}, z: ${tgt.z.toFixed(3)} }`;
+      this._copyToClipboardAndToast(yaml, 'Camera YAML');
+    }
+  }
+
+  private _copyToClipboardAndToast(text: string, label: string): void {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(
+        () => this._showToast(`${label} copied`, text),
+        () => this._showToast(label, text),
+      );
+    } else {
+      this._showToast(label, text);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Marker / Room-Control Overlay System
   // ---------------------------------------------------------------------------
 
@@ -3406,12 +3505,13 @@ export class Floor3dCard extends LitElement {
     wrapper.dataset.controlId = control.id;
 
     const inner = document.createElement('div');
-    inner.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);`;
+    inner.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);transition:border-color 0.2s;`;
 
     if (control.icon) {
       const icon = document.createElement('ha-icon');
       (icon as any).icon = control.icon;
-      icon.style.cssText = `width:${size * 0.6}px;height:${size * 0.6}px;color:white;`;
+      // start with the off color; _updateMarkersAndControls will correct it on first hass update
+      icon.style.cssText = `width:${size * 0.6}px;height:${size * 0.6}px;color:${control.color_off || 'rgba(255,255,255,0.35)'};transition:color 0.2s;`;
       inner.appendChild(icon);
     }
 
@@ -3596,19 +3696,21 @@ export class Floor3dCard extends LitElement {
         el.style.display = visible ? 'block' : 'none';
 
         if (visible) {
-          // Update icon color based on entity state
+          // Apply state color to the icon itself; keep the container neutral
           const entityState = hass.states[control.entity];
           const state = entityState ? entityState.state : null;
           const inner = el.querySelector('div') as HTMLElement;
           if (inner) {
             const isOn = state === 'on' || state === 'playing' || state === 'open';
-            const color = isOn ? (control.color_on || 'rgba(255,200,50,0.85)') : (control.color_off || 'rgba(0,0,0,0.5)');
-            inner.style.background = color;
-            // Update icon color too
             const icon = inner.querySelector('ha-icon') as HTMLElement;
             if (icon) {
-              icon.style.color = isOn ? '#fff' : 'rgba(255,255,255,0.5)';
+              icon.style.color = isOn
+                ? (control.color_on || 'rgba(255,200,50,0.9)')
+                : (control.color_off || 'rgba(255,255,255,0.35)');
             }
+            inner.style.borderColor = isOn
+              ? 'rgba(255,255,255,0.3)'
+              : 'rgba(255,255,255,0.1)';
           }
         }
       }
