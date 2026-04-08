@@ -2965,28 +2965,6 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   // Markers editor
   // ---------------------------------------------------------------------------
 
-  private _markerEntityChanged(ev): void {
-    if (!this._config) return;
-    const el = ev.currentTarget;
-    const index: number = el.__markerIndex;
-    const value: string = ev.detail.value;
-    const markers = [...(this._config.markers || [])];
-    markers[index] = { ...markers[index], entity: value };
-    this._config = { ...this._config, markers };
-    fireEvent(this, 'config-changed', { config: this._config });
-  }
-
-  private _roomControlEntityChanged(ev): void {
-    if (!this._config) return;
-    const el = ev.currentTarget;
-    const index: number = el.__controlIndex;
-    const value: string = ev.detail.value;
-    const controls = [...(this._config.room_controls || [])];
-    controls[index] = { ...controls[index], entity: value };
-    this._config = { ...this._config, room_controls: controls };
-    fireEvent(this, 'config-changed', { config: this._config });
-  }
-
   private _addMarker(): void {
     if (!this._config) return;
     const newMarker = { id: `marker_${Date.now()}`, entity: '', type: 'avatar' as const, rooms: {}, hide_states: ['not_home'] };
@@ -3097,143 +3075,113 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   private _createMarkerItemElement(marker: any, index: number): TemplateResult {
     const itemOptions = this._markerOptionsArray[index] || { show: false };
     const roomsText = marker.rooms
-      ? Object.entries(marker.rooms)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join('\n')
+      ? Object.entries(marker.rooms).map(([k, v]) => `${k}: ${v}`).join('\n')
       : '';
     const hideStatesText = Array.isArray(marker.hide_states) ? marker.hide_states.join(', ') : '';
 
+    // Helpers to update marker fields via inline closures
+    const setMarkerField = (field: string, value: any) => {
+      const markers = [...(this._config.markers || [])];
+      markers[index] = { ...markers[index], [field]: value };
+      this._config = { ...this._config, markers };
+      fireEvent(this, 'config-changed', { config: this._config });
+    };
+
     return html`
       <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
-        <!-- Header row: click anywhere except delete to toggle expand -->
-        <div
-          style="display:flex;align-items:center;cursor:pointer;user-select:none;"
-          @click=${this._toggleItemExpand}
-          .__expandOpts=${itemOptions}
-        >
-          <ha-icon
-            icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"
-            style="pointer-events:none;"
-          ></ha-icon>
-          <span style="margin-left:8px;font-weight:500;pointer-events:none;">
-            ${marker.id || `Marker ${index + 1}`}
-          </span>
-          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">
-            ${marker.entity || ''}
-          </span>
-          <ha-icon
-            icon="mdi:delete"
-            style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
-            .index=${index}
-            @click=${(ev) => { ev.stopPropagation(); this._removeMarker(ev); }}
-            title="Remove"
-          ></ha-icon>
+        <div style="display:flex;align-items:center;cursor:pointer;user-select:none;"
+             @click=${this._toggleItemExpand} .__expandOpts=${itemOptions}>
+          <ha-icon icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}" style="pointer-events:none;"></ha-icon>
+          <span style="margin-left:8px;font-weight:500;pointer-events:none;">${marker.id || `Marker ${index + 1}`}</span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">${marker.entity || ''}</span>
+          <ha-icon icon="mdi:delete" style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
+            .index=${index} @click=${(ev) => { ev.stopPropagation(); this._removeMarker(ev); }}></ha-icon>
         </div>
 
-        ${itemOptions.show
-          ? html`
-              <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-                <floor3d-textfield
-                  label="ID (unique)"
-                  fullwidth
-                  .value=${marker.id || ''}
-                  .configAttribute=${'id'}
-                  .markerIndex=${index}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
+        ${itemOptions.show ? html`
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
 
-                <div style="font-size:12px;color:var(--secondary-text-color);">Entity</div>
-                <ha-entity-picker
-                  .hass=${this.hass}
-                  .value=${marker.entity || ''}
-                  allow-custom-entity
-                  .__markerIndex=${index}
-                  @value-changed=${this._markerEntityChanged}
-                ></ha-entity-picker>
+            <floor3d-textfield label="ID (unique)" fullwidth
+              .value=${marker.id || ''}
+              @change=${(ev) => setMarkerField('id', ev.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-select
-                  label="Type"
-                  .configAttribute=${'type'}
-                  .markerIndex=${index}
-                  .value=${marker.type || 'avatar'}
-                  @selected=${this._markerFieldChanged}
+            <ha-selector
+              .hass=${this.hass}
+              .selector=${{ entity: {} }}
+              .value=${marker.entity || ''}
+              .label=${'Entity'}
+              @value-changed=${(ev) => setMarkerField('entity', ev.detail.value)}
+            ></ha-selector>
+
+            <floor3d-select label="Type"
+              .value=${marker.type || 'avatar'}
+              @selected=${(ev) => setMarkerField('type', ev.target.value)}
+            >
+              <mwc-list-item value="avatar">Avatar (image)</mwc-list-item>
+              <mwc-list-item value="icon">Icon (MDI)</mwc-list-item>
+              <mwc-list-item value="dot">Dot</mwc-list-item>
+              <mwc-list-item value="badge">Badge</mwc-list-item>
+            </floor3d-select>
+
+            <floor3d-textfield label="Label" fullwidth
+              .value=${marker.label || ''}
+              @change=${(ev) => setMarkerField('label', ev.target.value)}
+            ></floor3d-textfield>
+
+            ${marker.type === 'avatar' || !marker.type ? html`
+              <floor3d-textfield label="Image URL (e.g. /local/avatars/anas.png)" fullwidth
+                .value=${marker.image || ''}
+                @change=${(ev) => setMarkerField('image', ev.target.value)}
+              ></floor3d-textfield>
+            ` : html`
+              <floor3d-textfield label="Icon (e.g. mdi:account)" fullwidth
+                .value=${marker.icon || ''}
+                @change=${(ev) => setMarkerField('icon', ev.target.value)}
+              ></floor3d-textfield>
+            `}
+
+            <!-- Color with swatch picker -->
+            <div>
+              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">Color</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="color"
+                  .value=${marker.color && marker.color.startsWith('#') ? marker.color : '#4caf50'}
+                  style="width:40px;height:40px;border:none;border-radius:6px;cursor:pointer;padding:2px;background:none;"
+                  @change=${(ev) => setMarkerField('color', ev.target.value)}
                 >
-                  <mwc-list-item value="avatar">Avatar (image)</mwc-list-item>
-                  <mwc-list-item value="icon">Icon (MDI)</mwc-list-item>
-                  <mwc-list-item value="dot">Dot</mwc-list-item>
-                  <mwc-list-item value="badge">Badge</mwc-list-item>
-                </floor3d-select>
-
-                <floor3d-textfield
-                  label="Label"
-                  fullwidth
-                  .value=${marker.label || ''}
-                  .configAttribute=${'label'}
-                  .markerIndex=${index}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
-
-                ${marker.type === 'avatar' || !marker.type
-                  ? html`
-                      <floor3d-textfield
-                        label="Image URL (e.g. /local/avatars/anas.png)"
-                        fullwidth
-                        .value=${marker.image || ''}
-                        .configAttribute=${'image'}
-                        .markerIndex=${index}
-                        @change=${this._markerFieldChanged}
-                      ></floor3d-textfield>
-                    `
-                  : html`
-                      <floor3d-textfield
-                        label="Icon (e.g. mdi:account)"
-                        fullwidth
-                        .value=${marker.icon || ''}
-                        .configAttribute=${'icon'}
-                        .markerIndex=${index}
-                        @change=${this._markerFieldChanged}
-                      ></floor3d-textfield>
-                    `}
-
-                <floor3d-textfield
-                  label="Color (CSS, e.g. #4caf50)"
-                  fullwidth
+                <floor3d-textfield label="CSS color (hex, rgba…)" fullwidth
                   .value=${marker.color || ''}
-                  .configAttribute=${'color'}
-                  .markerIndex=${index}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
-
-                <floor3d-textfield
-                  label="Size (px, default 48)"
-                  type="number"
-                  .value=${marker.size !== undefined ? String(marker.size) : ''}
-                  .configAttribute=${'size'}
-                  .markerIndex=${index}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
-
-                <div style="font-size:12px;color:var(--secondary-text-color);margin-top:4px;">
-                  Room → Anchor mapping (one per line: <code>room_state: anchor_object_id</code>)
-                </div>
-                <textarea
-                  rows="6"
-                  style="width:100%;font-family:monospace;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid var(--divider-color,#ccc);border-radius:4px;"
-                  .markerIndex=${index}
-                  @change=${this._markerRoomsChanged}
-                >${roomsText}</textarea>
-
-                <floor3d-textfield
-                  label="Hide when states (comma-separated, e.g. not_home,unknown)"
-                  fullwidth
-                  .value=${hideStatesText}
-                  .configAttribute=${'_hide_states_text'}
-                  .markerIndex=${index}
-                  @change=${this._markerHideStatesChanged}
+                  @change=${(ev) => setMarkerField('color', ev.target.value)}
                 ></floor3d-textfield>
               </div>
-            `
-          : ''}
+            </div>
+
+            <floor3d-textfield label="Size (px, default 48)" type="number"
+              .value=${marker.size !== undefined ? String(marker.size) : ''}
+              @change=${(ev) => setMarkerField('size', Number(ev.target.value) || undefined)}
+            ></floor3d-textfield>
+
+            <div>
+              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">
+                Room → Anchor mapping (one per line: <code>room_state: anchor_object_id</code>)
+              </div>
+              <textarea rows="6"
+                style="width:100%;font-family:monospace;font-size:12px;padding:6px;box-sizing:border-box;border:1px solid var(--divider-color,#ccc);border-radius:4px;background:var(--card-background-color);color:var(--primary-text-color);"
+                .markerIndex=${index}
+                @change=${this._markerRoomsChanged}
+              >${roomsText}</textarea>
+            </div>
+
+            <floor3d-textfield label="Hide when states (comma-separated, e.g. not_home,unknown)" fullwidth
+              .value=${hideStatesText}
+              @change=${(ev) => {
+                setMarkerField('hide_states', ev.target.value.split(',').map((s) => s.trim()).filter(Boolean));
+              }}
+            ></floor3d-textfield>
+
+          </div>
+        ` : ''}
       </div>
     `;
   }
@@ -3310,145 +3258,105 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   private _createRoomControlItemElement(control: any, index: number): TemplateResult {
     const itemOptions = this._roomControlOptionsArray[index] || { show: false };
 
+    // Helper to update a control field via inline closures
+    const setControlField = (field: string, value: any) => {
+      const controls = [...(this._config.room_controls || [])];
+      controls[index] = { ...controls[index], [field]: value };
+      this._config = { ...this._config, room_controls: controls };
+      fireEvent(this, 'config-changed', { config: this._config });
+    };
+
+    const colorRow = (label: string, field: string, value: string) => html`
+      <div>
+        <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">${label}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="color"
+            .value=${value && value.startsWith('#') ? value : '#000000'}
+            style="width:40px;height:40px;border:none;border-radius:6px;cursor:pointer;padding:2px;background:none;"
+            @change=${(ev) => setControlField(field, ev.target.value)}
+          >
+          <floor3d-textfield label="CSS color (hex, rgba…)" fullwidth
+            .value=${value || ''}
+            @change=${(ev) => setControlField(field, ev.target.value)}
+          ></floor3d-textfield>
+        </div>
+      </div>
+    `;
+
     return html`
       <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
-        <!-- Header row -->
-        <div
-          style="display:flex;align-items:center;cursor:pointer;user-select:none;"
-          @click=${this._toggleItemExpand}
-          .__expandOpts=${itemOptions}
-        >
-          <ha-icon
-            icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"
-            style="pointer-events:none;"
-          ></ha-icon>
-          <span style="margin-left:8px;font-weight:500;pointer-events:none;">
-            ${control.id || `Control ${index + 1}`}
-          </span>
-          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">
-            ${control.entity || ''}
-          </span>
-          <ha-icon
-            icon="mdi:delete"
-            style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
-            .index=${index}
-            @click=${(ev) => { ev.stopPropagation(); this._removeRoomControl(ev); }}
-            title="Remove"
-          ></ha-icon>
+        <div style="display:flex;align-items:center;cursor:pointer;user-select:none;"
+             @click=${this._toggleItemExpand} .__expandOpts=${itemOptions}>
+          <ha-icon icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}" style="pointer-events:none;"></ha-icon>
+          <span style="margin-left:8px;font-weight:500;pointer-events:none;">${control.id || `Control ${index + 1}`}</span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">${control.entity || ''}</span>
+          <ha-icon icon="mdi:delete" style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
+            .index=${index} @click=${(ev) => { ev.stopPropagation(); this._removeRoomControl(ev); }}></ha-icon>
         </div>
 
-        ${itemOptions.show
-          ? html`
-              <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-                <floor3d-textfield
-                  label="ID (unique)"
-                  fullwidth
-                  .value=${control.id || ''}
-                  .configAttribute=${'id'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+        ${itemOptions.show ? html`
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
 
-                <div style="font-size:12px;color:var(--secondary-text-color);">Entity</div>
-                <ha-entity-picker
-                  .hass=${this.hass}
-                  .value=${control.entity || ''}
-                  allow-custom-entity
-                  .__controlIndex=${index}
-                  @value-changed=${this._roomControlEntityChanged}
-                ></ha-entity-picker>
+            <floor3d-textfield label="ID (unique)" fullwidth
+              .value=${control.id || ''}
+              @change=${(ev) => setControlField('id', ev.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Anchor (3D object name in model)"
-                  fullwidth
-                  .value=${control.anchor || ''}
-                  .configAttribute=${'anchor'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <ha-selector
+              .hass=${this.hass}
+              .selector=${{ entity: {} }}
+              .value=${control.entity || ''}
+              .label=${'Entity'}
+              @value-changed=${(ev) => setControlField('entity', ev.detail.value)}
+            ></ha-selector>
 
-                <floor3d-select
-                  label="Control Type"
-                  .configAttribute=${'control_type'}
-                  .controlIndex=${index}
-                  .value=${control.control_type || 'toggle'}
-                  @selected=${this._roomControlFieldChanged}
-                >
-                  <mwc-list-item value="toggle">Toggle (on/off)</mwc-list-item>
-                  <mwc-list-item value="more-info">More Info</mwc-list-item>
-                  <mwc-list-item value="service-call">Service Call</mwc-list-item>
-                  <mwc-list-item value="media-toggle">Media Toggle</mwc-list-item>
-                </floor3d-select>
+            <floor3d-textfield label="Anchor (3D object name in model)" fullwidth
+              .value=${control.anchor || ''}
+              @change=${(ev) => setControlField('anchor', ev.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Icon (e.g. mdi:lightbulb)"
-                  fullwidth
-                  .value=${control.icon || ''}
-                  .configAttribute=${'icon'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-select label="Control Type"
+              .value=${control.control_type || 'toggle'}
+              @selected=${(ev) => setControlField('control_type', ev.target.value)}
+            >
+              <mwc-list-item value="toggle">Toggle (on/off)</mwc-list-item>
+              <mwc-list-item value="more-info">More Info</mwc-list-item>
+              <mwc-list-item value="service-call">Service Call</mwc-list-item>
+              <mwc-list-item value="media-toggle">Media Toggle</mwc-list-item>
+            </floor3d-select>
 
-                <floor3d-textfield
-                  label="Label"
-                  fullwidth
-                  .value=${control.label || ''}
-                  .configAttribute=${'label'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Icon (e.g. mdi:lightbulb)" fullwidth
+              .value=${control.icon || ''}
+              @change=${(ev) => setControlField('icon', ev.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Color when ON (CSS, e.g. rgba(255,200,50,0.85))"
-                  fullwidth
-                  .value=${control.color_on || ''}
-                  .configAttribute=${'color_on'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Label" fullwidth
+              .value=${control.label || ''}
+              @change=${(ev) => setControlField('label', ev.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Color when OFF (CSS, e.g. rgba(0,0,0,0.5))"
-                  fullwidth
-                  .value=${control.color_off || ''}
-                  .configAttribute=${'color_off'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            ${colorRow('Color when ON', 'color_on', control.color_on || '')}
+            ${colorRow('Color when OFF', 'color_off', control.color_off || '')}
 
-                <floor3d-textfield
-                  label="Room (label, optional)"
-                  fullwidth
-                  .value=${control.room || ''}
-                  .configAttribute=${'room'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Room (label, optional)" fullwidth
+              .value=${control.room || ''}
+              @change=${(ev) => setControlField('room', ev.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Size (px, default 40)"
-                  type="number"
-                  .value=${control.size !== undefined ? String(control.size) : ''}
-                  .configAttribute=${'size'}
-                  .controlIndex=${index}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Size (px, default 40)" type="number"
+              .value=${control.size !== undefined ? String(control.size) : ''}
+              @change=${(ev) => setControlField('size', Number(ev.target.value) || undefined)}
+            ></floor3d-textfield>
 
-                ${control.control_type === 'service-call'
-                  ? html`
-                      <floor3d-textfield
-                        label="Service (e.g. light.toggle)"
-                        fullwidth
-                        .value=${control.service || ''}
-                        .configAttribute=${'service'}
-                        .controlIndex=${index}
-                        @change=${this._roomControlFieldChanged}
-                      ></floor3d-textfield>
-                    `
-                  : ''}
-              </div>
-            `
-          : ''}
+            ${control.control_type === 'service-call' ? html`
+              <floor3d-textfield label="Service (e.g. light.toggle)" fullwidth
+                .value=${control.service || ''}
+                @change=${(ev) => setControlField('service', ev.target.value)}
+              ></floor3d-textfield>
+            ` : ''}
+
+          </div>
+        ` : ''}
       </div>
     `;
   }
