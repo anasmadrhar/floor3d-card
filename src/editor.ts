@@ -33,6 +33,7 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   private _options: any;
   private _initialized = false;
   private _objects: any;
+  @state() private _objectIds: string[] = [];
   private _entity_ids: string[];
   private _visible: any[];
 
@@ -341,6 +342,10 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
       this._fetchObjectList();
     }
 
+    // Try to populate 3D object ID list from the live preview card
+    // (deferred so the card has time to load the model)
+    setTimeout(() => this._loadObjectIds(), 500);
+
     console.log('End editor config');
 
     //fireEvent(this, 'config-changed', { config: this._config });
@@ -387,6 +392,9 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   protected render(): TemplateResult | void {
     const show = this._config.overlay ? this._config.overlay == 'yes' : false;
     return html`
+      <datalist id="floor3d-objids">
+        ${this._objectIds.map((id) => html`<option value="${id}"></option>`)}
+      </datalist>
       <div class="sub-category" style="display: flex; flex-direction: row; align-items: left;">
         <ha-icon @click=${this._config_changed} icon="mdi:refresh" class="ha-icon-large"> </ha-icon>
       </div>
@@ -413,6 +421,15 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     }
   }
 
+  private _loadObjectIds(): void {
+    const card: any = this._preview_card();
+    if (!card || typeof card.getObjectIds !== 'function') return;
+    const ids: string[] = card.getObjectIds();
+    if (ids.length > 0 && ids.join(',') !== this._objectIds.join(',')) {
+      this._objectIds = ids;
+    }
+  }
+
   private _config_changed(): void {
     console.log('Config change start');
     let preview_card: any = this._preview_card();
@@ -420,6 +437,7 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     if (preview_card) {
       preview_card.rerender();
     }
+    this._loadObjectIds();
   }
 
   private _createObjectGroupsValues(): TemplateResult[] {
@@ -3171,6 +3189,11 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                 .markerIndex=${index}
                 @change=${this._markerRoomsChanged}
               >${roomsText}</textarea>
+              ${this._objectIds.length > 0 ? html`
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:4px;">
+                  Available object IDs: ${this._objectIds.join(', ')}
+                </div>
+              ` : html``}
             </div>
 
             <floor3d-textfield label="Hide when states (comma-separated, e.g. not_home,unknown)" fullwidth
@@ -3310,10 +3333,16 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
               @value-changed=${(ev) => setControlField('entity', ev.detail.value)}
             ></ha-selector>
 
-            <floor3d-textfield label="Anchor (3D object name in model)" fullwidth
-              .value=${control.anchor || ''}
-              @change=${(ev) => setControlField('anchor', ev.target.value)}
-            ></floor3d-textfield>
+            <div>
+              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">Anchor (3D object name in model)</div>
+              <input
+                list="floor3d-objids"
+                .value=${control.anchor || ''}
+                @change=${(ev: Event) => setControlField('anchor', (ev.target as HTMLInputElement).value)}
+                style="width:100%;padding:8px;box-sizing:border-box;border:1px solid var(--divider-color,#ccc);border-radius:4px;background:var(--card-background-color);color:var(--primary-text-color);font-size:14px;"
+                placeholder="e.g. living_room_center"
+              >
+            </div>
 
             <floor3d-select label="Control Type"
               .value=${control.control_type || 'toggle'}
