@@ -3597,26 +3597,37 @@ export class Floor3dCard extends LitElement {
   private _updateOverlayPositions(): void {
     if (!this._markerOverlay || !this._camera) return;
 
+    const GAP = 8; // px gap between stacked items sharing the same anchor
+
+    // Collect all visible items, grouped by anchor ID so we can auto-stack them
+    type OverlayItem = {
+      el: HTMLElement;
+      baseX: number;
+      baseY: number;
+      behind: boolean;
+      size: number;
+      offsetX: number;
+      offsetY: number;
+    };
+    const groups = new Map<string, OverlayItem[]>();
+
     // Markers
     if (this._config.markers) {
       for (const marker of this._config.markers) {
         const el = this._markerElements.get(marker.id);
         if (!el || el.style.display === 'none') continue;
-
         const anchorId = el.dataset.currentAnchor;
         if (!anchorId) continue;
-
         const worldPos = this._getAnchorWorldPos(anchorId, marker.z_offset || 0);
         if (!worldPos) continue;
-
         const { x, y, behind } = this._projectToScreen(worldPos);
-        if (behind) {
-          el.style.opacity = '0';
-        } else {
-          el.style.opacity = '1';
-          el.style.left = `${x}px`;
-          el.style.top = `${y}px`;
-        }
+        if (!groups.has(anchorId)) groups.set(anchorId, []);
+        groups.get(anchorId)!.push({
+          el, baseX: x, baseY: y, behind,
+          size: marker.size || 48,
+          offsetX: marker.offset_x || 0,
+          offsetY: marker.offset_y || 0,
+        });
       }
     }
 
@@ -3625,17 +3636,35 @@ export class Floor3dCard extends LitElement {
       for (const control of this._config.room_controls) {
         const el = this._roomControlElements.get(control.id);
         if (!el || el.style.display === 'none') continue;
-
-        const worldPos = this._getAnchorWorldPos(control.anchor, control.z_offset || 0);
+        const anchorId = control.anchor;
+        if (!anchorId) continue;
+        const worldPos = this._getAnchorWorldPos(anchorId, control.z_offset || 0);
         if (!worldPos) continue;
-
         const { x, y, behind } = this._projectToScreen(worldPos);
-        if (behind) {
-          el.style.opacity = '0';
+        if (!groups.has(anchorId)) groups.set(anchorId, []);
+        groups.get(anchorId)!.push({
+          el, baseX: x, baseY: y, behind,
+          size: control.size || 40,
+          offsetX: control.offset_x || 0,
+          offsetY: control.offset_y || 0,
+        });
+      }
+    }
+
+    // Apply positions. When multiple items share an anchor, spread them
+    // horizontally as a centered chip row; manual offset_x/y applied on top.
+    for (const group of groups.values()) {
+      const totalWidth = group.reduce((sum, item) => sum + item.size, 0) + GAP * (group.length - 1);
+      let cursor = -totalWidth / 2;
+      for (const item of group) {
+        const stackX = cursor + item.size / 2;
+        cursor += item.size + GAP;
+        if (item.behind) {
+          item.el.style.opacity = '0';
         } else {
-          el.style.opacity = '1';
-          el.style.left = `${x}px`;
-          el.style.top = `${y}px`;
+          item.el.style.opacity = '1';
+          item.el.style.left = `${item.baseX + stackX + item.offsetX}px`;
+          item.el.style.top = `${item.baseY + item.offsetY}px`;
         }
       }
     }
@@ -3697,14 +3726,7 @@ export class Floor3dCard extends LitElement {
         } else {
           el.style.display = 'block';
           el.dataset.currentAnchor = anchorId;
-          // Immediately update position
-          const worldPos = this._getAnchorWorldPos(anchorId, marker.z_offset || 0);
-          if (worldPos) {
-            const { x, y, behind } = this._projectToScreen(worldPos);
-            el.style.opacity = behind ? '0' : '1';
-            el.style.left = `${x}px`;
-            el.style.top = `${y}px`;
-          }
+          // Position is handled by _updateOverlayPositions() called below
         }
       }
     }

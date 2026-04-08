@@ -79,6 +79,8 @@ export interface MarkerConfig {
   visible_when?: VisibilityCondition; // additional visibility condition
   action?: 'more-info' | 'none'; // click action (default: more-info)
   z_offset?: number;             // vertical offset in world units above anchor
+  offset_x?: number;             // manual screen-space X offset in pixels (applied after auto-stacking)
+  offset_y?: number;             // manual screen-space Y offset in pixels (applied after auto-stacking)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +105,8 @@ export interface RoomControlConfig {
   service?: string;               // e.g. "light.toggle"
   service_data?: Record<string, any>;
   z_offset?: number;              // vertical offset in world units
+  offset_x?: number;              // manual screen-space X offset in pixels (applied after auto-stacking)
+  offset_y?: number;              // manual screen-space Y offset in pixels (applied after auto-stacking)
 }
 
 // ---------------------------------------------------------------------------
