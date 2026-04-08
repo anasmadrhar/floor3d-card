@@ -516,13 +516,8 @@ export class Floor3dCard extends LitElement {
   }
 
   getCardSize(): number {
-    console.log('Get Card Size Called');
-    if (this._renderer) {
-      //return this._renderer.domElement.height / 50;
-      return 10;
-    } else {
-      return 10;
-    }
+    const px = this._config?.height || 400;
+    return Math.ceil(px / 72);
   }
 
   firstUpdated(): void {
@@ -534,7 +529,12 @@ export class Floor3dCard extends LitElement {
       if (!this._content) {
         this._content = document.createElement('div');
         this._content.style.width = '100%';
-        this._content.style.height = '100%';
+        // Height: panel = full viewport; otherwise use config.height (px) or 400px default
+        if (this._ispanel()) {
+          this._content.style.height = 'calc(100vh - var(--header-height))';
+        } else {
+          this._content.style.height = (this._config.height ? this._config.height + 'px' : '400px');
+        }
         this._content.style.alignContent = 'center';
         this._card.appendChild(this._content);
       }
@@ -3264,16 +3264,11 @@ export class Floor3dCard extends LitElement {
       return this._showError(localize('common.show_error'));
     }
 
-    let htmlHeight: string;
-    if (this._ispanel()) htmlHeight = 'calc(100vh - var(--header-height))';
-    else if (this._config.height) htmlHeight = this._config.height + 'px';
-    else htmlHeight = '400px';
-
     return html`
       <ha-card
         tabindex="0"
         .style=${`${
-          this._config.style || 'overflow: hidden; width: auto; height: ' + htmlHeight + '; position: relative;'
+          this._config.style || 'overflow: hidden; width: auto; position: relative; padding: 0;'
         }`}
         id="${this._card_id}"
       >
@@ -3669,19 +3664,20 @@ export class Floor3dCard extends LitElement {
         const entityState = hass.states[marker.entity];
         const currentRoom = entityState ? entityState.state : null;
 
-        // For person type: update image from entity_picture + label from friendly_name
-        if (marker.type === 'person' && entityState) {
-          const img = el.querySelector('img') as HTMLImageElement | null;
-          if (img) {
-            const pic = entityState.attributes?.entity_picture;
-            if (pic && img.dataset.personEntity === marker.entity) {
-              // Prepend HA base URL if it's a relative path
-              img.src = pic.startsWith('http') ? pic : pic;
-              img.alt = entityState.attributes?.friendly_name || marker.id;
+        // For person type: update image from person_entity (or fallback to entity)
+        if (marker.type === 'person') {
+          const personEntityId = (marker as any).person_entity || marker.entity;
+          const personState = hass.states[personEntityId];
+          if (personState) {
+            const img = el.querySelector('img') as HTMLImageElement | null;
+            if (img) {
+              const pic = personState.attributes?.entity_picture;
+              if (pic) {
+                img.src = pic;
+                img.alt = personState.attributes?.friendly_name || marker.label || marker.id;
+              }
             }
-          }
-          if (!el.title && entityState.attributes?.friendly_name) {
-            el.title = entityState.attributes.friendly_name;
+            el.title = marker.label || personState.attributes?.friendly_name || marker.id;
           }
         }
 

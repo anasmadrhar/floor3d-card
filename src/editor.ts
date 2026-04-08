@@ -3187,9 +3187,16 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
             ></floor3d-textfield>
 
             ${marker.type === 'person' ? html`
-              <div style="font-size:12px;color:var(--secondary-text-color);padding:6px 0;">
-                Uses the entity's profile picture and friendly name automatically.
-                Set Entity above to a <code>person.*</code> entity.
+              <ha-selector
+                .hass=${this.hass}
+                .selector=${{ entity: { domain: 'person' } }}
+                .value=${marker.person_entity || ''}
+                .label=${'Person entity (for avatar)'}
+                @value-changed=${(ev) => setMarkerField('person_entity', ev.detail.value)}
+              ></ha-selector>
+              <div style="font-size:12px;color:var(--secondary-text-color);padding:4px 0;">
+                Avatar and name are read from the person entity's profile.
+                The <em>Entity</em> field above is still used for room-state tracking.
               </div>
             ` : marker.type === 'icon' || marker.type === 'dot' || marker.type === 'badge' ? html`
               <floor3d-textfield label="Icon (e.g. mdi:account)" fullwidth
