@@ -343,8 +343,8 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     }
 
     // Try to populate 3D object ID list from the live preview card
-    // (deferred so the card has time to load the model)
-    setTimeout(() => this._loadObjectIds(), 500);
+    // (retries up to 15s to wait for the model to finish loading)
+    this._startLoadObjectIdsRetry();
 
     console.log('End editor config');
 
@@ -392,9 +392,6 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   protected render(): TemplateResult | void {
     const show = this._config.overlay ? this._config.overlay == 'yes' : false;
     return html`
-      <datalist id="floor3d-objids">
-        ${this._objectIds.map((id) => html`<option value="${id}"></option>`)}
-      </datalist>
       <div class="sub-category" style="display: flex; flex-direction: row; align-items: left;">
         <ha-icon @click=${this._config_changed} icon="mdi:refresh" class="ha-icon-large"> </ha-icon>
       </div>
@@ -422,12 +419,38 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   }
 
   private _loadObjectIds(): void {
-    const card: any = this._preview_card();
-    if (!card || typeof card.getObjectIds !== 'function') return;
-    const ids: string[] = card.getObjectIds();
-    if (ids.length > 0 && ids.join(',') !== this._objectIds.join(',')) {
-      this._objectIds = ids;
+    // Try the known preview-card path first, then fall back to any floor3d-card on the page
+    let card: any = this._preview_card();
+    if (!card) {
+      const found = document.getElementsByTagName('floor3d-card');
+      if (found.length > 0) card = found[0];
     }
+
+    if (card && typeof card.getObjectIds === 'function') {
+      const ids: string[] = card.getObjectIds();
+      if (ids.length > 0) {
+        if (ids.join(',') !== this._objectIds.join(',')) {
+          this._objectIds = ids;
+        }
+        return; // success — stop retrying
+      }
+    }
+
+    // If the scene objectlist JSON is already loaded, use those names as a fallback
+    if (this._objects && this._objects.length > 0 && this._objectIds.length === 0) {
+      this._objectIds = [...this._objects];
+    }
+  }
+
+  private _startLoadObjectIdsRetry(): void {
+    let retries = 0;
+    const tryLoad = (): void => {
+      this._loadObjectIds();
+      if (this._objectIds.length === 0 && retries++ < 15) {
+        setTimeout(tryLoad, 1000);
+      }
+    };
+    setTimeout(tryLoad, 500);
   }
 
   private _config_changed(): void {
@@ -3334,14 +3357,20 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
             ></ha-selector>
 
             <div>
-              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">Anchor (3D object name in model)</div>
-              <input
-                list="floor3d-objids"
+              <floor3d-textfield label="Anchor (3D object name in model)" fullwidth
                 .value=${control.anchor || ''}
-                @change=${(ev: Event) => setControlField('anchor', (ev.target as HTMLInputElement).value)}
-                style="width:100%;padding:8px;box-sizing:border-box;border:1px solid var(--divider-color,#ccc);border-radius:4px;background:var(--card-background-color);color:var(--primary-text-color);font-size:14px;"
-                placeholder="e.g. living_room_center"
-              >
+                @change=${(ev) => setControlField('anchor', ev.target.value)}
+              ></floor3d-textfield>
+              ${this._objectIds.length > 0 ? html`
+                <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
+                  ${this._objectIds.map((id) => html`
+                    <button
+                      style="font-size:11px;padding:2px 8px;border-radius:12px;border:1px solid var(--divider-color,#888);background:var(--secondary-background-color,#333);color:var(--primary-text-color);cursor:pointer;white-space:nowrap;"
+                      @click=${() => setControlField('anchor', id)}
+                    >${id}</button>
+                  `)}
+                </div>
+              ` : html``}
             </div>
 
             <floor3d-select label="Control Type"
