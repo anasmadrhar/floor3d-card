@@ -3458,9 +3458,10 @@ export class Floor3dCard extends LitElement {
     wrapper.dataset.markerId = marker.id;
 
     // Inner content depending on marker type
-    if (marker.type === 'avatar' && marker.image) {
+    if (marker.type === 'person' || (marker.type === 'avatar' && marker.image)) {
       const img = document.createElement('img');
-      img.src = marker.image;
+      img.src = marker.type === 'person' ? '' : marker.image;
+      img.dataset.personEntity = marker.type === 'person' ? marker.entity : '';
       img.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;border:2px solid ${marker.color || 'white'};box-shadow:0 2px 8px rgba(0,0,0,0.5);`;
       img.alt = marker.label || marker.id;
       wrapper.appendChild(img);
@@ -3666,6 +3667,22 @@ export class Floor3dCard extends LitElement {
         // Get current room from entity state
         const entityState = hass.states[marker.entity];
         const currentRoom = entityState ? entityState.state : null;
+
+        // For person type: update image from entity_picture + label from friendly_name
+        if (marker.type === 'person' && entityState) {
+          const img = el.querySelector('img') as HTMLImageElement | null;
+          if (img) {
+            const pic = entityState.attributes?.entity_picture;
+            if (pic && img.dataset.personEntity === marker.entity) {
+              // Prepend HA base URL if it's a relative path
+              img.src = pic.startsWith('http') ? pic : pic;
+              img.alt = entityState.attributes?.friendly_name || marker.id;
+            }
+          }
+          if (!el.title && entityState.attributes?.friendly_name) {
+            el.title = entityState.attributes.friendly_name;
+          }
+        }
 
         // Check hide_states
         if (visible && currentRoom && marker.hide_states) {

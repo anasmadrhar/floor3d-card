@@ -51,7 +51,7 @@ export interface AnchorConfig {
 // Marker config (person / pet / device presence indicators)
 // ---------------------------------------------------------------------------
 
-export type MarkerType = 'avatar' | 'icon' | 'dot' | 'badge';
+export type MarkerType = 'avatar' | 'person' | 'icon' | 'dot' | 'badge';
 
 /**
  * Maps entity state values (room names) to anchor object IDs.
