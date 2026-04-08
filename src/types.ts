@@ -67,8 +67,9 @@ export type MarkerRoomMap = Record<string, string>;
 export interface MarkerConfig {
   id: string;                    // unique identifier
   label?: string;                // display label
-  entity: string;                // HA entity (e.g. input_select.anas_current_room)
+  entity: string;                // HA entity for room state (e.g. input_select.anas_current_room)
   type: MarkerType;              // rendering style
+  person_entity?: string;        // for type:'person' — the person.* entity to get picture/name from
   image?: string;                // URL for avatar type (e.g. /local/avatars/anas.png)
   icon?: string;                 // MDI icon name for icon type (e.g. mdi:account)
   color?: string;                // CSS color for dot/icon/badge
