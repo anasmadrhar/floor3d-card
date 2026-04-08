@@ -2185,7 +2185,7 @@ const yi=h`.mdc-floating-label{-moz-osx-font-smoothing:grayscale;-webkit-font-sm
                   `:""}
             </div>
           `:""}
-    `}_initialize(){void 0!==this.hass&&void 0!==this._config&&void 0!==this._helpers&&(this._initialized=!0)}async loadCardHelpers(){this._helpers=await window.loadCardHelpers()}_toggleAction(t){this._toggleThing(t)}_toggleOption(t){this._toggleThing(t)}_typeChanged(t){if(!this._config||!this.hass)return;const e=t.target;if(e.configObject[e.configAttribute]==e.value)return;let i=e.configObject[e.configAttribute];if(this._valueChanged(t),console.log("Type3D changed start"),e.configObject[i]){const e=this._configArray,r=[];e.forEach(((e,o)=>{if(t.target.configIndex==o){let e;switch(i){case"light":e=n(t.target.configObject,["light"]);break;case"room":e=n(t.target.configObject,["room"]);break;case"zoom":e=n(t.target.configObject,["zoom"]);break;case"color":e=n(t.target.configObject,["colorcondition"]);break;case"hide":e=n(t.target.configObject,["hide"]);break;case"show":e=n(t.target.configObject,["show"]);break;case"door":e=n(t.target.configObject,["door"]);break;case"gesture":e=n(t.target.configObject,["gesture"]);break;case"camera":e=n(t.target.configObject,["camera"]);break;case"text":e=n(t.target.configObject,["text"]);break;case"rotate":e=n(t.target.configObject,["rotate"]);break;case"cover":e=n(t.target.configObject,["cover"])}console.log(e),r.push(e)}else r.push(e)})),this._configArray=r}t.target.optionTgt.color&&(t.target.optionTgt.color.visible=!1),t.target.optionTgt.hide&&(t.target.optionTgt.hide.visible=!1),t.target.optionTgt.show&&(t.target.optionTgt.show.visible=!1),t.target.optionTgt.room&&(t.target.optionTgt.room.visible=!1),t.target.optionTgt.zoom&&(t.target.optionTgt.zoom.visible=!1),t.target.optionTgt.door&&(t.target.optionTgt.door.visible=!1),t.target.optionTgt.text&&(t.target.optionTgt.text.visible=!1),t.target.optionTgt.cover&&(t.target.optionTgt.cover.visible=!1),t.target.optionTgt.gesture&&(t.target.optionTgt.gesture.visible=!1),t.target.optionTgt.rotate&&(t.target.optionTgt.rotate.visible=!1),t.target.optionTgt.camera&&(t.target.optionTgt.camera.visible=!1),t.target.optionTgt.light&&(t.target.optionTgt.light.visible=!1),console.log("Type3D changed end")}_valueChanged(t){if(!this._config||!this.hass)return;const e=t.target;if(e.configObject[e.configAttribute]!=e.value){if(e.configAdd&&""!==e.value&&(e.configObject=Object.assign(e.configObject,{[e.configAdd]:{[e.configAttribute]:e.value}})),e.configAttribute&&e.configObject&&!e.configAdd)if(""==e.value||!1===e.value){if(1==e.ignoreNull)return;delete e.configObject[e.configAttribute]}else e.configObject[e.configAttribute]=e.value;this._config.entities=this._configArray,this._config.object_groups=this._configObjectArray,this._config.zoom_areas=this._configZoomArray,yt(this,"config-changed",{config:this._config})}}_markerEntityChanged(t){if(!this._config)return;const e=t.currentTarget.__markerIndex,i=t.detail.value,n=[...this._config.markers||[]];n[e]=Object.assign(Object.assign({},n[e]),{entity:i}),this._config=Object.assign(Object.assign({},this._config),{markers:n}),yt(this,"config-changed",{config:this._config})}_roomControlEntityChanged(t){if(!this._config)return;const e=t.currentTarget.__controlIndex,i=t.detail.value,n=[...this._config.room_controls||[]];n[e]=Object.assign(Object.assign({},n[e]),{entity:i}),this._config=Object.assign(Object.assign({},this._config),{room_controls:n}),yt(this,"config-changed",{config:this._config})}_addMarker(){if(!this._config)return;const t={id:`marker_${Date.now()}`,entity:"",type:"avatar",rooms:{},hide_states:["not_home"]},e=[...this._config.markers||[],t];this._config=Object.assign(Object.assign({},this._config),{markers:e}),this._markerOptionsArray=e.map(((t,e)=>e<this._markerOptionsArray.length?this._markerOptionsArray[e]:{show:!0})),yt(this,"config-changed",{config:this._config})}_removeMarker(t){if(!this._config)return;const e=t.target.index,i=[...this._config.markers||[]];i.splice(e,1),this._config=Object.assign(Object.assign({},this._config),{markers:i}),this._markerOptionsArray.splice(e,1),yt(this,"config-changed",{config:this._config})}_markerFieldChanged(t){if(!this._config)return;const e=t.target,i=e.markerIndex,n=e.configAttribute,r=[...this._config.markers||[]];r[i]=Object.assign(Object.assign({},r[i]),{[n]:e.value}),this._config=Object.assign(Object.assign({},this._config),{markers:r}),yt(this,"config-changed",{config:this._config})}_markerHideStatesChanged(t){if(!this._config)return;const e=t.target,i=e.markerIndex,n=[...this._config.markers||[]];n[i]=Object.assign(Object.assign({},n[i]),{hide_states:(e.value||"").split(",").map((t=>t.trim())).filter(Boolean)}),this._config=Object.assign(Object.assign({},this._config),{markers:n}),yt(this,"config-changed",{config:this._config})}_markerRoomsChanged(t){if(!this._config)return;const e=t.target,i=e.markerIndex;let n={};try{const t=e.value||"";t.trim().startsWith("{")?n=JSON.parse(t):t.split("\n").forEach((t=>{const e=t.match(/^\s*([^:]+):\s*(.+)\s*$/);e&&(n[e[1].trim()]=e[2].trim())}))}catch(t){return}const r=[...this._config.markers||[]];r[i]=Object.assign(Object.assign({},r[i]),{rooms:n}),this._config=Object.assign(Object.assign({},this._config),{markers:r}),yt(this,"config-changed",{config:this._config})}_createMarkersElement(){if(!this.hass||!this._config)return B``;const t=this._options.markers,e=this._config.markers||[];return B`
+    `}_initialize(){void 0!==this.hass&&void 0!==this._config&&void 0!==this._helpers&&(this._initialized=!0)}async loadCardHelpers(){this._helpers=await window.loadCardHelpers()}_toggleAction(t){this._toggleThing(t)}_toggleOption(t){this._toggleThing(t)}_typeChanged(t){if(!this._config||!this.hass)return;const e=t.target;if(e.configObject[e.configAttribute]==e.value)return;let i=e.configObject[e.configAttribute];if(this._valueChanged(t),console.log("Type3D changed start"),e.configObject[i]){const e=this._configArray,r=[];e.forEach(((e,o)=>{if(t.target.configIndex==o){let e;switch(i){case"light":e=n(t.target.configObject,["light"]);break;case"room":e=n(t.target.configObject,["room"]);break;case"zoom":e=n(t.target.configObject,["zoom"]);break;case"color":e=n(t.target.configObject,["colorcondition"]);break;case"hide":e=n(t.target.configObject,["hide"]);break;case"show":e=n(t.target.configObject,["show"]);break;case"door":e=n(t.target.configObject,["door"]);break;case"gesture":e=n(t.target.configObject,["gesture"]);break;case"camera":e=n(t.target.configObject,["camera"]);break;case"text":e=n(t.target.configObject,["text"]);break;case"rotate":e=n(t.target.configObject,["rotate"]);break;case"cover":e=n(t.target.configObject,["cover"])}console.log(e),r.push(e)}else r.push(e)})),this._configArray=r}t.target.optionTgt.color&&(t.target.optionTgt.color.visible=!1),t.target.optionTgt.hide&&(t.target.optionTgt.hide.visible=!1),t.target.optionTgt.show&&(t.target.optionTgt.show.visible=!1),t.target.optionTgt.room&&(t.target.optionTgt.room.visible=!1),t.target.optionTgt.zoom&&(t.target.optionTgt.zoom.visible=!1),t.target.optionTgt.door&&(t.target.optionTgt.door.visible=!1),t.target.optionTgt.text&&(t.target.optionTgt.text.visible=!1),t.target.optionTgt.cover&&(t.target.optionTgt.cover.visible=!1),t.target.optionTgt.gesture&&(t.target.optionTgt.gesture.visible=!1),t.target.optionTgt.rotate&&(t.target.optionTgt.rotate.visible=!1),t.target.optionTgt.camera&&(t.target.optionTgt.camera.visible=!1),t.target.optionTgt.light&&(t.target.optionTgt.light.visible=!1),console.log("Type3D changed end")}_valueChanged(t){if(!this._config||!this.hass)return;const e=t.target;if(e.configObject[e.configAttribute]!=e.value){if(e.configAdd&&""!==e.value&&(e.configObject=Object.assign(e.configObject,{[e.configAdd]:{[e.configAttribute]:e.value}})),e.configAttribute&&e.configObject&&!e.configAdd)if(""==e.value||!1===e.value){if(1==e.ignoreNull)return;delete e.configObject[e.configAttribute]}else e.configObject[e.configAttribute]=e.value;this._config.entities=this._configArray,this._config.object_groups=this._configObjectArray,this._config.zoom_areas=this._configZoomArray,yt(this,"config-changed",{config:this._config})}}_addMarker(){if(!this._config)return;const t={id:`marker_${Date.now()}`,entity:"",type:"avatar",rooms:{},hide_states:["not_home"]},e=[...this._config.markers||[],t];this._config=Object.assign(Object.assign({},this._config),{markers:e}),this._markerOptionsArray=e.map(((t,e)=>e<this._markerOptionsArray.length?this._markerOptionsArray[e]:{show:!0})),yt(this,"config-changed",{config:this._config})}_removeMarker(t){if(!this._config)return;const e=t.target.index,i=[...this._config.markers||[]];i.splice(e,1),this._config=Object.assign(Object.assign({},this._config),{markers:i}),this._markerOptionsArray.splice(e,1),yt(this,"config-changed",{config:this._config})}_markerFieldChanged(t){if(!this._config)return;const e=t.target,i=e.markerIndex,n=e.configAttribute,r=[...this._config.markers||[]];r[i]=Object.assign(Object.assign({},r[i]),{[n]:e.value}),this._config=Object.assign(Object.assign({},this._config),{markers:r}),yt(this,"config-changed",{config:this._config})}_markerHideStatesChanged(t){if(!this._config)return;const e=t.target,i=e.markerIndex,n=[...this._config.markers||[]];n[i]=Object.assign(Object.assign({},n[i]),{hide_states:(e.value||"").split(",").map((t=>t.trim())).filter(Boolean)}),this._config=Object.assign(Object.assign({},this._config),{markers:n}),yt(this,"config-changed",{config:this._config})}_markerRoomsChanged(t){if(!this._config)return;const e=t.target,i=e.markerIndex;let n={};try{const t=e.value||"";t.trim().startsWith("{")?n=JSON.parse(t):t.split("\n").forEach((t=>{const e=t.match(/^\s*([^:]+):\s*(.+)\s*$/);e&&(n[e[1].trim()]=e[2].trim())}))}catch(t){return}const r=[...this._config.markers||[]];r[i]=Object.assign(Object.assign({},r[i]),{rooms:n}),this._config=Object.assign(Object.assign({},this._config),{markers:r}),yt(this,"config-changed",{config:this._config})}_createMarkersElement(){if(!this.hass||!this._config)return B``;const t=this._options.markers,e=this._config.markers||[];return B`
       <div class="category" id="markers">
         <div class="sub-category" @click=${this._toggleThing} .options=${t} .optionsTarget=${this._options}>
           <div class="row">
@@ -2208,133 +2208,99 @@ const yi=h`.mdc-floating-label{-moz-osx-font-smoothing:grayscale;-webkit-font-sm
               </div>
             `:""}
       </div>
-    `}_createMarkerItemElement(t,e){const i=this._markerOptionsArray[e]||{show:!1},n=t.rooms?Object.entries(t.rooms).map((([t,e])=>`${t}: ${e}`)).join("\n"):"",r=Array.isArray(t.hide_states)?t.hide_states.join(", "):"";return B`
+    `}_createMarkerItemElement(t,e){const i=this._markerOptionsArray[e]||{show:!1},n=t.rooms?Object.entries(t.rooms).map((([t,e])=>`${t}: ${e}`)).join("\n"):"",r=Array.isArray(t.hide_states)?t.hide_states.join(", "):"",o=(t,i)=>{const n=[...this._config.markers||[]];n[e]=Object.assign(Object.assign({},n[e]),{[t]:i}),this._config=Object.assign(Object.assign({},this._config),{markers:n}),yt(this,"config-changed",{config:this._config})};return B`
       <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
-        <!-- Header row: click anywhere except delete to toggle expand -->
-        <div
-          style="display:flex;align-items:center;cursor:pointer;user-select:none;"
-          @click=${this._toggleItemExpand}
-          .__expandOpts=${i}
-        >
-          <ha-icon
-            icon="mdi:chevron-${i.show?"up":"down"}"
-            style="pointer-events:none;"
-          ></ha-icon>
-          <span style="margin-left:8px;font-weight:500;pointer-events:none;">
-            ${t.id||`Marker ${e+1}`}
-          </span>
-          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">
-            ${t.entity||""}
-          </span>
-          <ha-icon
-            icon="mdi:delete"
-            style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
-            .index=${e}
-            @click=${t=>{t.stopPropagation(),this._removeMarker(t)}}
-            title="Remove"
-          ></ha-icon>
+        <div style="display:flex;align-items:center;cursor:pointer;user-select:none;"
+             @click=${this._toggleItemExpand} .__expandOpts=${i}>
+          <ha-icon icon="mdi:chevron-${i.show?"up":"down"}" style="pointer-events:none;"></ha-icon>
+          <span style="margin-left:8px;font-weight:500;pointer-events:none;">${t.id||`Marker ${e+1}`}</span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">${t.entity||""}</span>
+          <ha-icon icon="mdi:delete" style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
+            .index=${e} @click=${t=>{t.stopPropagation(),this._removeMarker(t)}}></ha-icon>
         </div>
 
         ${i.show?B`
-              <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-                <floor3d-textfield
-                  label="ID (unique)"
-                  fullwidth
-                  .value=${t.id||""}
-                  .configAttribute=${"id"}
-                  .markerIndex=${e}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
 
-                <div style="font-size:12px;color:var(--secondary-text-color);">Entity</div>
-                <ha-entity-picker
-                  .hass=${this.hass}
-                  .value=${t.entity||""}
-                  allow-custom-entity
-                  .__markerIndex=${e}
-                  @value-changed=${this._markerEntityChanged}
-                ></ha-entity-picker>
+            <floor3d-textfield label="ID (unique)" fullwidth
+              .value=${t.id||""}
+              @change=${t=>o("id",t.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-select
-                  label="Type"
-                  .configAttribute=${"type"}
-                  .markerIndex=${e}
-                  .value=${t.type||"avatar"}
-                  @selected=${this._markerFieldChanged}
+            <ha-selector
+              .hass=${this.hass}
+              .selector=${{entity:{}}}
+              .value=${t.entity||""}
+              .label=${"Entity"}
+              @value-changed=${t=>o("entity",t.detail.value)}
+            ></ha-selector>
+
+            <floor3d-select label="Type"
+              .value=${t.type||"avatar"}
+              @selected=${t=>o("type",t.target.value)}
+            >
+              <mwc-list-item value="avatar">Avatar (image)</mwc-list-item>
+              <mwc-list-item value="icon">Icon (MDI)</mwc-list-item>
+              <mwc-list-item value="dot">Dot</mwc-list-item>
+              <mwc-list-item value="badge">Badge</mwc-list-item>
+            </floor3d-select>
+
+            <floor3d-textfield label="Label" fullwidth
+              .value=${t.label||""}
+              @change=${t=>o("label",t.target.value)}
+            ></floor3d-textfield>
+
+            ${"avatar"!==t.type&&t.type?B`
+              <floor3d-textfield label="Icon (e.g. mdi:account)" fullwidth
+                .value=${t.icon||""}
+                @change=${t=>o("icon",t.target.value)}
+              ></floor3d-textfield>
+            `:B`
+              <floor3d-textfield label="Image URL (e.g. /local/avatars/anas.png)" fullwidth
+                .value=${t.image||""}
+                @change=${t=>o("image",t.target.value)}
+              ></floor3d-textfield>
+            `}
+
+            <!-- Color with swatch picker -->
+            <div>
+              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">Color</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="color"
+                  .value=${t.color&&t.color.startsWith("#")?t.color:"#4caf50"}
+                  style="width:40px;height:40px;border:none;border-radius:6px;cursor:pointer;padding:2px;background:none;"
+                  @change=${t=>o("color",t.target.value)}
                 >
-                  <mwc-list-item value="avatar">Avatar (image)</mwc-list-item>
-                  <mwc-list-item value="icon">Icon (MDI)</mwc-list-item>
-                  <mwc-list-item value="dot">Dot</mwc-list-item>
-                  <mwc-list-item value="badge">Badge</mwc-list-item>
-                </floor3d-select>
-
-                <floor3d-textfield
-                  label="Label"
-                  fullwidth
-                  .value=${t.label||""}
-                  .configAttribute=${"label"}
-                  .markerIndex=${e}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
-
-                ${"avatar"!==t.type&&t.type?B`
-                      <floor3d-textfield
-                        label="Icon (e.g. mdi:account)"
-                        fullwidth
-                        .value=${t.icon||""}
-                        .configAttribute=${"icon"}
-                        .markerIndex=${e}
-                        @change=${this._markerFieldChanged}
-                      ></floor3d-textfield>
-                    `:B`
-                      <floor3d-textfield
-                        label="Image URL (e.g. /local/avatars/anas.png)"
-                        fullwidth
-                        .value=${t.image||""}
-                        .configAttribute=${"image"}
-                        .markerIndex=${e}
-                        @change=${this._markerFieldChanged}
-                      ></floor3d-textfield>
-                    `}
-
-                <floor3d-textfield
-                  label="Color (CSS, e.g. #4caf50)"
-                  fullwidth
+                <floor3d-textfield label="CSS color (hex, rgba…)" fullwidth
                   .value=${t.color||""}
-                  .configAttribute=${"color"}
-                  .markerIndex=${e}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
-
-                <floor3d-textfield
-                  label="Size (px, default 48)"
-                  type="number"
-                  .value=${void 0!==t.size?String(t.size):""}
-                  .configAttribute=${"size"}
-                  .markerIndex=${e}
-                  @change=${this._markerFieldChanged}
-                ></floor3d-textfield>
-
-                <div style="font-size:12px;color:var(--secondary-text-color);margin-top:4px;">
-                  Room → Anchor mapping (one per line: <code>room_state: anchor_object_id</code>)
-                </div>
-                <textarea
-                  rows="6"
-                  style="width:100%;font-family:monospace;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid var(--divider-color,#ccc);border-radius:4px;"
-                  .markerIndex=${e}
-                  @change=${this._markerRoomsChanged}
-                >${n}</textarea>
-
-                <floor3d-textfield
-                  label="Hide when states (comma-separated, e.g. not_home,unknown)"
-                  fullwidth
-                  .value=${r}
-                  .configAttribute=${"_hide_states_text"}
-                  .markerIndex=${e}
-                  @change=${this._markerHideStatesChanged}
+                  @change=${t=>o("color",t.target.value)}
                 ></floor3d-textfield>
               </div>
-            `:""}
+            </div>
+
+            <floor3d-textfield label="Size (px, default 48)" type="number"
+              .value=${void 0!==t.size?String(t.size):""}
+              @change=${t=>o("size",Number(t.target.value)||void 0)}
+            ></floor3d-textfield>
+
+            <div>
+              <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">
+                Room → Anchor mapping (one per line: <code>room_state: anchor_object_id</code>)
+              </div>
+              <textarea rows="6"
+                style="width:100%;font-family:monospace;font-size:12px;padding:6px;box-sizing:border-box;border:1px solid var(--divider-color,#ccc);border-radius:4px;background:var(--card-background-color);color:var(--primary-text-color);"
+                .markerIndex=${e}
+                @change=${this._markerRoomsChanged}
+              >${n}</textarea>
+            </div>
+
+            <floor3d-textfield label="Hide when states (comma-separated, e.g. not_home,unknown)" fullwidth
+              .value=${r}
+              @change=${t=>{o("hide_states",t.target.value.split(",").map((t=>t.trim())).filter(Boolean))}}
+            ></floor3d-textfield>
+
+          </div>
+        `:""}
       </div>
     `}_addRoomControl(){if(!this._config)return;const t={id:`control_${Date.now()}`,entity:"",anchor:"",control_type:"toggle",icon:"mdi:lightbulb"},e=[...this._config.room_controls||[],t];this._config=Object.assign(Object.assign({},this._config),{room_controls:e}),this._roomControlOptionsArray=e.map(((t,e)=>e<this._roomControlOptionsArray.length?this._roomControlOptionsArray[e]:{show:!0})),yt(this,"config-changed",{config:this._config})}_removeRoomControl(t){if(!this._config)return;const e=t.target.index,i=[...this._config.room_controls||[]];i.splice(e,1),this._config=Object.assign(Object.assign({},this._config),{room_controls:i}),this._roomControlOptionsArray.splice(e,1),yt(this,"config-changed",{config:this._config})}_roomControlFieldChanged(t){if(!this._config)return;const e=t.target,i=e.controlIndex,n=e.configAttribute,r=[...this._config.room_controls||[]];r[i]=Object.assign(Object.assign({},r[i]),{[n]:e.value}),this._config=Object.assign(Object.assign({},this._config),{room_controls:r}),yt(this,"config-changed",{config:this._config})}_createRoomControlsElement(){if(!this.hass||!this._config)return B``;const t=this._options.room_controls,e=this._config.room_controls||[];return B`
       <div class="category" id="room_controls">
@@ -2359,141 +2325,95 @@ const yi=h`.mdc-floating-label{-moz-osx-font-smoothing:grayscale;-webkit-font-sm
               </div>
             `:""}
       </div>
-    `}_createRoomControlItemElement(t,e){const i=this._roomControlOptionsArray[e]||{show:!1};return B`
+    `}_createRoomControlItemElement(t,e){const i=this._roomControlOptionsArray[e]||{show:!1},n=(t,i)=>{const n=[...this._config.room_controls||[]];n[e]=Object.assign(Object.assign({},n[e]),{[t]:i}),this._config=Object.assign(Object.assign({},this._config),{room_controls:n}),yt(this,"config-changed",{config:this._config})},r=(t,e,i)=>B`
+      <div>
+        <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">${t}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="color"
+            .value=${i&&i.startsWith("#")?i:"#000000"}
+            style="width:40px;height:40px;border:none;border-radius:6px;cursor:pointer;padding:2px;background:none;"
+            @change=${t=>n(e,t.target.value)}
+          >
+          <floor3d-textfield label="CSS color (hex, rgba…)" fullwidth
+            .value=${i||""}
+            @change=${t=>n(e,t.target.value)}
+          ></floor3d-textfield>
+        </div>
+      </div>
+    `;return B`
       <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
-        <!-- Header row -->
-        <div
-          style="display:flex;align-items:center;cursor:pointer;user-select:none;"
-          @click=${this._toggleItemExpand}
-          .__expandOpts=${i}
-        >
-          <ha-icon
-            icon="mdi:chevron-${i.show?"up":"down"}"
-            style="pointer-events:none;"
-          ></ha-icon>
-          <span style="margin-left:8px;font-weight:500;pointer-events:none;">
-            ${t.id||`Control ${e+1}`}
-          </span>
-          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">
-            ${t.entity||""}
-          </span>
-          <ha-icon
-            icon="mdi:delete"
-            style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
-            .index=${e}
-            @click=${t=>{t.stopPropagation(),this._removeRoomControl(t)}}
-            title="Remove"
-          ></ha-icon>
+        <div style="display:flex;align-items:center;cursor:pointer;user-select:none;"
+             @click=${this._toggleItemExpand} .__expandOpts=${i}>
+          <ha-icon icon="mdi:chevron-${i.show?"up":"down"}" style="pointer-events:none;"></ha-icon>
+          <span style="margin-left:8px;font-weight:500;pointer-events:none;">${t.id||`Control ${e+1}`}</span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">${t.entity||""}</span>
+          <ha-icon icon="mdi:delete" style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
+            .index=${e} @click=${t=>{t.stopPropagation(),this._removeRoomControl(t)}}></ha-icon>
         </div>
 
         ${i.show?B`
-              <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-                <floor3d-textfield
-                  label="ID (unique)"
-                  fullwidth
-                  .value=${t.id||""}
-                  .configAttribute=${"id"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px;">
 
-                <div style="font-size:12px;color:var(--secondary-text-color);">Entity</div>
-                <ha-entity-picker
-                  .hass=${this.hass}
-                  .value=${t.entity||""}
-                  allow-custom-entity
-                  .__controlIndex=${e}
-                  @value-changed=${this._roomControlEntityChanged}
-                ></ha-entity-picker>
+            <floor3d-textfield label="ID (unique)" fullwidth
+              .value=${t.id||""}
+              @change=${t=>n("id",t.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Anchor (3D object name in model)"
-                  fullwidth
-                  .value=${t.anchor||""}
-                  .configAttribute=${"anchor"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <ha-selector
+              .hass=${this.hass}
+              .selector=${{entity:{}}}
+              .value=${t.entity||""}
+              .label=${"Entity"}
+              @value-changed=${t=>n("entity",t.detail.value)}
+            ></ha-selector>
 
-                <floor3d-select
-                  label="Control Type"
-                  .configAttribute=${"control_type"}
-                  .controlIndex=${e}
-                  .value=${t.control_type||"toggle"}
-                  @selected=${this._roomControlFieldChanged}
-                >
-                  <mwc-list-item value="toggle">Toggle (on/off)</mwc-list-item>
-                  <mwc-list-item value="more-info">More Info</mwc-list-item>
-                  <mwc-list-item value="service-call">Service Call</mwc-list-item>
-                  <mwc-list-item value="media-toggle">Media Toggle</mwc-list-item>
-                </floor3d-select>
+            <floor3d-textfield label="Anchor (3D object name in model)" fullwidth
+              .value=${t.anchor||""}
+              @change=${t=>n("anchor",t.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Icon (e.g. mdi:lightbulb)"
-                  fullwidth
-                  .value=${t.icon||""}
-                  .configAttribute=${"icon"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-select label="Control Type"
+              .value=${t.control_type||"toggle"}
+              @selected=${t=>n("control_type",t.target.value)}
+            >
+              <mwc-list-item value="toggle">Toggle (on/off)</mwc-list-item>
+              <mwc-list-item value="more-info">More Info</mwc-list-item>
+              <mwc-list-item value="service-call">Service Call</mwc-list-item>
+              <mwc-list-item value="media-toggle">Media Toggle</mwc-list-item>
+            </floor3d-select>
 
-                <floor3d-textfield
-                  label="Label"
-                  fullwidth
-                  .value=${t.label||""}
-                  .configAttribute=${"label"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Icon (e.g. mdi:lightbulb)" fullwidth
+              .value=${t.icon||""}
+              @change=${t=>n("icon",t.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Color when ON (CSS, e.g. rgba(255,200,50,0.85))"
-                  fullwidth
-                  .value=${t.color_on||""}
-                  .configAttribute=${"color_on"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Label" fullwidth
+              .value=${t.label||""}
+              @change=${t=>n("label",t.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Color when OFF (CSS, e.g. rgba(0,0,0,0.5))"
-                  fullwidth
-                  .value=${t.color_off||""}
-                  .configAttribute=${"color_off"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            ${r("Color when ON","color_on",t.color_on||"")}
+            ${r("Color when OFF","color_off",t.color_off||"")}
 
-                <floor3d-textfield
-                  label="Room (label, optional)"
-                  fullwidth
-                  .value=${t.room||""}
-                  .configAttribute=${"room"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Room (label, optional)" fullwidth
+              .value=${t.room||""}
+              @change=${t=>n("room",t.target.value)}
+            ></floor3d-textfield>
 
-                <floor3d-textfield
-                  label="Size (px, default 40)"
-                  type="number"
-                  .value=${void 0!==t.size?String(t.size):""}
-                  .configAttribute=${"size"}
-                  .controlIndex=${e}
-                  @change=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+            <floor3d-textfield label="Size (px, default 40)" type="number"
+              .value=${void 0!==t.size?String(t.size):""}
+              @change=${t=>n("size",Number(t.target.value)||void 0)}
+            ></floor3d-textfield>
 
-                ${"service-call"===t.control_type?B`
-                      <floor3d-textfield
-                        label="Service (e.g. light.toggle)"
-                        fullwidth
-                        .value=${t.service||""}
-                        .configAttribute=${"service"}
-                        .controlIndex=${e}
-                        @change=${this._roomControlFieldChanged}
-                      ></floor3d-textfield>
-                    `:""}
-              </div>
+            ${"service-call"===t.control_type?B`
+              <floor3d-textfield label="Service (e.g. light.toggle)" fullwidth
+                .value=${t.service||""}
+                @change=${t=>n("service",t.target.value)}
+              ></floor3d-textfield>
             `:""}
+
+          </div>
+        `:""}
       </div>
     `}static get styles(){return h`
       .option {
