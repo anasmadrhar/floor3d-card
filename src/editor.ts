@@ -99,8 +99,18 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     }
 
     // Build per-item options arrays (for expand/collapse state)
-    this._markerOptionsArray = (this._config.markers || []).map(() => ({ show: false }));
-    this._roomControlOptionsArray = (this._config.room_controls || []).map(() => ({ show: false }));
+    // Preserve existing expand states across setConfig re-calls (triggered on every config-changed event)
+    const prevMarkerOpts = this._markerOptionsArray || [];
+    const markerCount = (this._config.markers || []).length;
+    this._markerOptionsArray = Array.from({ length: markerCount }, (_, i) =>
+      i < prevMarkerOpts.length ? prevMarkerOpts[i] : { show: false }
+    );
+
+    const prevRoomControlOpts = this._roomControlOptionsArray || [];
+    const roomControlCount = (this._config.room_controls || []).length;
+    this._roomControlOptionsArray = Array.from({ length: roomControlCount }, (_, i) =>
+      i < prevRoomControlOpts.length ? prevRoomControlOpts[i] : { show: false }
+    );
 
     //console.log(JSON.stringify(this._config));
 
@@ -1239,6 +1249,20 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
       }
     }
     options.show = show;
+    this._toggle = !this._toggle;
+  }
+
+  /**
+   * Toggle expand for marker/room-control items.
+   * Uses currentTarget (the element with the handler) instead of target (the
+   * clicked child element) so it works regardless of which child was tapped.
+   */
+  private _toggleItemExpand(ev): void {
+    ev.stopPropagation();
+    const el = ev.currentTarget;
+    const opts = el.__expandOpts;
+    if (!opts) return;
+    opts.show = !opts.show;
     this._toggle = !this._toggle;
   }
 
@@ -2941,6 +2965,28 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   // Markers editor
   // ---------------------------------------------------------------------------
 
+  private _markerEntityChanged(ev): void {
+    if (!this._config) return;
+    const el = ev.currentTarget;
+    const index: number = el.__markerIndex;
+    const value: string = ev.detail.value;
+    const markers = [...(this._config.markers || [])];
+    markers[index] = { ...markers[index], entity: value };
+    this._config = { ...this._config, markers };
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _roomControlEntityChanged(ev): void {
+    if (!this._config) return;
+    const el = ev.currentTarget;
+    const index: number = el.__controlIndex;
+    const value: string = ev.detail.value;
+    const controls = [...(this._config.room_controls || [])];
+    controls[index] = { ...controls[index], entity: value };
+    this._config = { ...this._config, room_controls: controls };
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
   private _addMarker(): void {
     if (!this._config) return;
     const newMarker = { id: `marker_${Date.now()}`, entity: '', type: 'avatar' as const, rooms: {}, hide_states: ['not_home'] };
@@ -2969,6 +3015,22 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     const attr: string = target.configAttribute;
     const markers = [...(this._config.markers || [])];
     markers[index] = { ...markers[index], [attr]: target.value };
+    this._config = { ...this._config, markers };
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
+
+  private _markerHideStatesChanged(ev): void {
+    if (!this._config) return;
+    const el = ev.target;
+    const index: number = el.markerIndex;
+    const markers = [...(this._config.markers || [])];
+    markers[index] = {
+      ...markers[index],
+      hide_states: (el.value || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
     this._config = { ...this._config, markers };
     fireEvent(this, 'config-changed', { config: this._config });
   }
@@ -3043,23 +3105,31 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
 
     return html`
       <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
+        <!-- Header row: click anywhere except delete to toggle expand -->
         <div
-          style="display:flex;align-items:center;cursor:pointer;"
-          @click=${this._toggleThing}
-          .options=${itemOptions}
-          .optionsTarget=${this._markerOptionsArray}
+          style="display:flex;align-items:center;cursor:pointer;user-select:none;"
+          @click=${this._toggleItemExpand}
+          .__expandOpts=${itemOptions}
         >
-          <ha-icon icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"></ha-icon>
-          <span style="margin-left:8px;font-weight:500;">${marker.id || `Marker ${index + 1}`}</span>
-          <span style="margin-left:8px;opacity:0.6;font-size:12px;">${marker.entity || ''}</span>
+          <ha-icon
+            icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"
+            style="pointer-events:none;"
+          ></ha-icon>
+          <span style="margin-left:8px;font-weight:500;pointer-events:none;">
+            ${marker.id || `Marker ${index + 1}`}
+          </span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">
+            ${marker.entity || ''}
+          </span>
           <ha-icon
             icon="mdi:delete"
             style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
             .index=${index}
-            @click=${this._removeMarker}
+            @click=${(ev) => { ev.stopPropagation(); this._removeMarker(ev); }}
             title="Remove"
           ></ha-icon>
         </div>
+
         ${itemOptions.show
           ? html`
               <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
@@ -3069,16 +3139,18 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                   .value=${marker.id || ''}
                   .configAttribute=${'id'}
                   .markerIndex=${index}
-                  @input=${this._markerFieldChanged}
+                  @change=${this._markerFieldChanged}
                 ></floor3d-textfield>
-                <floor3d-textfield
-                  label="HA Entity (e.g. input_select.anas_current_room)"
-                  fullwidth
+
+                <div style="font-size:12px;color:var(--secondary-text-color);">Entity</div>
+                <ha-entity-picker
+                  .hass=${this.hass}
                   .value=${marker.entity || ''}
-                  .configAttribute=${'entity'}
-                  .markerIndex=${index}
-                  @input=${this._markerFieldChanged}
-                ></floor3d-textfield>
+                  allow-custom-entity
+                  .__markerIndex=${index}
+                  @value-changed=${this._markerEntityChanged}
+                ></ha-entity-picker>
+
                 <floor3d-select
                   label="Type"
                   .configAttribute=${'type'}
@@ -3091,23 +3163,25 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                   <mwc-list-item value="dot">Dot</mwc-list-item>
                   <mwc-list-item value="badge">Badge</mwc-list-item>
                 </floor3d-select>
+
                 <floor3d-textfield
                   label="Label"
                   fullwidth
                   .value=${marker.label || ''}
                   .configAttribute=${'label'}
                   .markerIndex=${index}
-                  @input=${this._markerFieldChanged}
+                  @change=${this._markerFieldChanged}
                 ></floor3d-textfield>
+
                 ${marker.type === 'avatar' || !marker.type
                   ? html`
                       <floor3d-textfield
-                        label="Image URL (for avatar, e.g. /local/avatars/anas.png)"
+                        label="Image URL (e.g. /local/avatars/anas.png)"
                         fullwidth
                         .value=${marker.image || ''}
                         .configAttribute=${'image'}
                         .markerIndex=${index}
-                        @input=${this._markerFieldChanged}
+                        @change=${this._markerFieldChanged}
                       ></floor3d-textfield>
                     `
                   : html`
@@ -3117,26 +3191,29 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                         .value=${marker.icon || ''}
                         .configAttribute=${'icon'}
                         .markerIndex=${index}
-                        @input=${this._markerFieldChanged}
+                        @change=${this._markerFieldChanged}
                       ></floor3d-textfield>
                     `}
+
                 <floor3d-textfield
                   label="Color (CSS, e.g. #4caf50)"
                   fullwidth
                   .value=${marker.color || ''}
                   .configAttribute=${'color'}
                   .markerIndex=${index}
-                  @input=${this._markerFieldChanged}
+                  @change=${this._markerFieldChanged}
                 ></floor3d-textfield>
+
                 <floor3d-textfield
                   label="Size (px, default 48)"
                   type="number"
                   .value=${marker.size !== undefined ? String(marker.size) : ''}
                   .configAttribute=${'size'}
                   .markerIndex=${index}
-                  @input=${this._markerFieldChanged}
+                  @change=${this._markerFieldChanged}
                 ></floor3d-textfield>
-                <div style="font-size:12px;opacity:0.7;margin-top:4px;">
+
+                <div style="font-size:12px;color:var(--secondary-text-color);margin-top:4px;">
                   Room → Anchor mapping (one per line: <code>room_state: anchor_object_id</code>)
                 </div>
                 <textarea
@@ -3145,24 +3222,14 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                   .markerIndex=${index}
                   @change=${this._markerRoomsChanged}
                 >${roomsText}</textarea>
+
                 <floor3d-textfield
                   label="Hide when states (comma-separated, e.g. not_home,unknown)"
                   fullwidth
                   .value=${hideStatesText}
                   .configAttribute=${'_hide_states_text'}
                   .markerIndex=${index}
-                  @input=${(ev) => {
-                    const markers = [...(this._config.markers || [])];
-                    markers[index] = {
-                      ...markers[index],
-                      hide_states: ev.target.value
-                        .split(',')
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    };
-                    this._config = { ...this._config, markers };
-                    fireEvent(this, 'config-changed', { config: this._config });
-                  }}
+                  @change=${this._markerHideStatesChanged}
                 ></floor3d-textfield>
               </div>
             `
@@ -3245,23 +3312,31 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
 
     return html`
       <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
+        <!-- Header row -->
         <div
-          style="display:flex;align-items:center;cursor:pointer;"
-          @click=${this._toggleThing}
-          .options=${itemOptions}
-          .optionsTarget=${this._roomControlOptionsArray}
+          style="display:flex;align-items:center;cursor:pointer;user-select:none;"
+          @click=${this._toggleItemExpand}
+          .__expandOpts=${itemOptions}
         >
-          <ha-icon icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"></ha-icon>
-          <span style="margin-left:8px;font-weight:500;">${control.id || `Control ${index + 1}`}</span>
-          <span style="margin-left:8px;opacity:0.6;font-size:12px;">${control.entity || ''}</span>
+          <ha-icon
+            icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}"
+            style="pointer-events:none;"
+          ></ha-icon>
+          <span style="margin-left:8px;font-weight:500;pointer-events:none;">
+            ${control.id || `Control ${index + 1}`}
+          </span>
+          <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">
+            ${control.entity || ''}
+          </span>
           <ha-icon
             icon="mdi:delete"
             style="margin-left:auto;cursor:pointer;color:var(--error-color,red);"
             .index=${index}
-            @click=${this._removeRoomControl}
+            @click=${(ev) => { ev.stopPropagation(); this._removeRoomControl(ev); }}
             title="Remove"
           ></ha-icon>
         </div>
+
         ${itemOptions.show
           ? html`
               <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
@@ -3271,24 +3346,27 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                   .value=${control.id || ''}
                   .configAttribute=${'id'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
-                <floor3d-textfield
-                  label="HA Entity (e.g. light.living_room)"
-                  fullwidth
+
+                <div style="font-size:12px;color:var(--secondary-text-color);">Entity</div>
+                <ha-entity-picker
+                  .hass=${this.hass}
                   .value=${control.entity || ''}
-                  .configAttribute=${'entity'}
-                  .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
-                ></floor3d-textfield>
+                  allow-custom-entity
+                  .__controlIndex=${index}
+                  @value-changed=${this._roomControlEntityChanged}
+                ></ha-entity-picker>
+
                 <floor3d-textfield
                   label="Anchor (3D object name in model)"
                   fullwidth
                   .value=${control.anchor || ''}
                   .configAttribute=${'anchor'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
+
                 <floor3d-select
                   label="Control Type"
                   .configAttribute=${'control_type'}
@@ -3301,54 +3379,61 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                   <mwc-list-item value="service-call">Service Call</mwc-list-item>
                   <mwc-list-item value="media-toggle">Media Toggle</mwc-list-item>
                 </floor3d-select>
+
                 <floor3d-textfield
                   label="Icon (e.g. mdi:lightbulb)"
                   fullwidth
                   .value=${control.icon || ''}
                   .configAttribute=${'icon'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
+
                 <floor3d-textfield
                   label="Label"
                   fullwidth
                   .value=${control.label || ''}
                   .configAttribute=${'label'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
+
                 <floor3d-textfield
                   label="Color when ON (CSS, e.g. rgba(255,200,50,0.85))"
                   fullwidth
                   .value=${control.color_on || ''}
                   .configAttribute=${'color_on'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
+
                 <floor3d-textfield
                   label="Color when OFF (CSS, e.g. rgba(0,0,0,0.5))"
                   fullwidth
                   .value=${control.color_off || ''}
                   .configAttribute=${'color_off'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
+
                 <floor3d-textfield
                   label="Room (label, optional)"
                   fullwidth
                   .value=${control.room || ''}
                   .configAttribute=${'room'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
+
                 <floor3d-textfield
                   label="Size (px, default 40)"
                   type="number"
                   .value=${control.size !== undefined ? String(control.size) : ''}
                   .configAttribute=${'size'}
                   .controlIndex=${index}
-                  @input=${this._roomControlFieldChanged}
+                  @change=${this._roomControlFieldChanged}
                 ></floor3d-textfield>
+
                 ${control.control_type === 'service-call'
                   ? html`
                       <floor3d-textfield
@@ -3357,7 +3442,7 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                         .value=${control.service || ''}
                         .configAttribute=${'service'}
                         .controlIndex=${index}
-                        @input=${this._roomControlFieldChanged}
+                        @change=${this._roomControlFieldChanged}
                       ></floor3d-textfield>
                     `
                   : ''}
