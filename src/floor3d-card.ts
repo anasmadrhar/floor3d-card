@@ -550,10 +550,16 @@ export class Floor3dCard extends LitElement {
           const newObjectIds = this._object_ids;
           const newHass = this._hass;
 
-          // Transfer all state from old card to this one
+          // Transfer only floor3d-card-specific private properties.
+          // We must NOT copy Lit/LitElement internal properties (they start with
+          // _$ or are named renderRoot / shadowRoot / etc.) — doing so corrupts
+          // the new element's reactive lifecycle and produces a black screen.
+          const SKIP = new Set(['renderRoot', 'shadowRoot', 'isConnected',
+            '_resizeObserver', '_zIndexInterval', '_card', '_card_id']);
           const ownProps = Object.getOwnPropertyNames(oldCard);
           for (const prop of ownProps) {
-            try { (this as any)[prop] = oldCard[prop]; } catch (_) { /* skip read-only */ }
+            if (prop.startsWith('_$') || SKIP.has(prop)) continue;
+            try { (this as any)[prop] = (oldCard as any)[prop]; } catch (_) { /* skip read-only */ }
           }
 
           // Restore new config/hass
