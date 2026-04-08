@@ -409,6 +409,8 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     root = root && root.shadowRoot;
     root = root && root.querySelector('ha-dialog');
 
+    if (!root) return null;
+
     const preview_card: HTMLCollection = root.getElementsByTagName('floor3d-card');
 
     if (preview_card.length == 0) {
@@ -445,7 +447,11 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   private _startLoadObjectIdsRetry(): void {
     let retries = 0;
     const tryLoad = (): void => {
-      this._loadObjectIds();
+      try {
+        this._loadObjectIds();
+      } catch (_e) {
+        // ignore — never let a background retry crash the editor
+      }
       if (this._objectIds.length === 0 && retries++ < 15) {
         setTimeout(tryLoad, 1000);
       }
@@ -3157,9 +3163,13 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
 
             <floor3d-select label="Type"
               .value=${marker.type || 'avatar'}
-              @selected=${(ev) => setMarkerField('type', ev.target.value)}
+              @selected=${(ev) => {
+                const v = ev.target.value;
+                if (v && v !== (marker.type || 'avatar')) setMarkerField('type', v);
+              }}
             >
               <mwc-list-item value="avatar">Avatar (image)</mwc-list-item>
+              <mwc-list-item value="person">Person entity (auto-avatar)</mwc-list-item>
               <mwc-list-item value="icon">Icon (MDI)</mwc-list-item>
               <mwc-list-item value="dot">Dot</mwc-list-item>
               <mwc-list-item value="badge">Badge</mwc-list-item>
@@ -3170,15 +3180,20 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
               @change=${(ev) => setMarkerField('label', ev.target.value)}
             ></floor3d-textfield>
 
-            ${marker.type === 'avatar' || !marker.type ? html`
-              <floor3d-textfield label="Image URL (e.g. /local/avatars/anas.png)" fullwidth
-                .value=${marker.image || ''}
-                @change=${(ev) => setMarkerField('image', ev.target.value)}
-              ></floor3d-textfield>
-            ` : html`
+            ${marker.type === 'person' ? html`
+              <div style="font-size:12px;color:var(--secondary-text-color);padding:6px 0;">
+                Uses the entity's profile picture and friendly name automatically.
+                Set Entity above to a <code>person.*</code> entity.
+              </div>
+            ` : marker.type === 'icon' || marker.type === 'dot' || marker.type === 'badge' ? html`
               <floor3d-textfield label="Icon (e.g. mdi:account)" fullwidth
                 .value=${marker.icon || ''}
                 @change=${(ev) => setMarkerField('icon', ev.target.value)}
+              ></floor3d-textfield>
+            ` : html`
+              <floor3d-textfield label="Image URL (e.g. /local/avatars/anas.png)" fullwidth
+                .value=${marker.image || ''}
+                @change=${(ev) => setMarkerField('image', ev.target.value)}
               ></floor3d-textfield>
             `}
 
@@ -3375,7 +3390,10 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
 
             <floor3d-select label="Control Type"
               .value=${control.control_type || 'toggle'}
-              @selected=${(ev) => setControlField('control_type', ev.target.value)}
+              @selected=${(ev) => {
+                const v = ev.target.value;
+                if (v && v !== (control.control_type || 'toggle')) setControlField('control_type', v);
+              }}
             >
               <mwc-list-item value="toggle">Toggle (on/off)</mwc-list-item>
               <mwc-list-item value="more-info">More Info</mwc-list-item>
