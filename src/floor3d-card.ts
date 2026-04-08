@@ -131,6 +131,7 @@ export class Floor3dCard extends LitElement {
   _helper: THREE.DirectionalLightHelper;
   private _modelready: boolean;
   private _maxtextureimage: number;
+  private _loadedModelKey = ''; // tracks which model files are currently loaded
 
   // --- Marker / room-control overlay system ---
   private _markerOverlay?: HTMLDivElement;
@@ -454,6 +455,7 @@ export class Floor3dCard extends LitElement {
 
     this._renderer.domElement.remove();
     this._renderer = null;
+    this._loadedModelKey = ''; // force reload on next display3dmodel call
 
     this._states = null;
     this.hass = this._hass;
@@ -1294,6 +1296,14 @@ export class Floor3dCard extends LitElement {
 
   protected display3dmodel(): void {
     //load the model into the GL Renderer
+
+    // Skip reload if the exact same model files are already loaded
+    const modelKey = `${this._config.path || ''}|${this._config.objfile || ''}|${this._config.mtlfile || ''}`;
+    if (this._loadedModelKey === modelKey && this._renderer) {
+      console.log('floor3d-card: model already loaded, skipping reload');
+      return;
+    }
+    this._loadedModelKey = modelKey;
 
     console.log('Start Build Renderer');
     this._modelready = false;
