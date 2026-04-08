@@ -45,11 +45,6 @@ class ModelSource {
   public static GLB = 1;
 }
 
-// Module-level cache: when HA re-creates the card element during editor
-// config changes, we transfer the loaded 3D state from the old instance
-// to the new one so the model doesn't have to reload from disk.
-let _floor3dCachedCard: { key: string; instance: any } | null = null;
-
 // TODO Name your custom element
 @customElement('floor3d-card')
 export class Floor3dCard extends LitElement {
@@ -216,16 +211,8 @@ export class Floor3dCard extends LitElement {
 
     this._resizeObserver.disconnect();
     window.clearInterval(this._zIndexInterval);
-
-    if (this._modelready && this._renderer) {
-      // Cache this instance so a new element with the same model can reuse it
-      const key = `${this._config?.path || ''}|${this._config?.objfile || ''}|${this._config?.mtlfile || ''}`;
-      _floor3dCachedCard = { key, instance: this };
-      // Stop animation but keep renderer/scene alive for transfer
-      if (this._to_animate) {
-        this._clock = null;
-        this._renderer.setAnimationLoop(null);
-      }
+    if (this._to_animate) {
+      this._renderer.setAnimationLoop(null);
     }
   }
 
@@ -535,77 +522,6 @@ export class Floor3dCard extends LitElement {
 
     this._card = this.shadowRoot.getElementById(this._card_id);
     if (this._card) {
-      // Check for cached state from a recently disconnected instance (editor preview re-creation)
-      const modelKey = `${this._config?.path || ''}|${this._config?.objfile || ''}|${this._config?.mtlfile || ''}`;
-      if (_floor3dCachedCard && _floor3dCachedCard.key === modelKey && this._config) {
-        const oldCard = _floor3dCachedCard.instance;
-        _floor3dCachedCard = null;
-
-        if (oldCard._modelready && oldCard._content && oldCard._renderer) {
-          console.log('floor3d-card: reusing cached model, skipping reload');
-
-          // Save new instance's config/hass (set by HA before firstUpdated)
-          const newConfig = this._config;
-          const newConfigArray = this._configArray;
-          const newObjectIds = this._object_ids;
-          const newHass = this._hass;
-
-          // Transfer only floor3d-card-specific private properties.
-          // We must NOT copy Lit/LitElement internal properties (they start with
-          // _$ or are named renderRoot / shadowRoot / etc.) — doing so corrupts
-          // the new element's reactive lifecycle and produces a black screen.
-          const SKIP = new Set(['renderRoot', 'shadowRoot', 'isConnected',
-            '_resizeObserver', '_zIndexInterval', '_card', '_card_id']);
-          const ownProps = Object.getOwnPropertyNames(oldCard);
-          for (const prop of ownProps) {
-            if (prop.startsWith('_$') || SKIP.has(prop)) continue;
-            try { (this as any)[prop] = (oldCard as any)[prop]; } catch (_) { /* skip read-only */ }
-          }
-
-          // Restore new config/hass
-          this._config = newConfig;
-          this._configArray = newConfigArray;
-          this._object_ids = newObjectIds;
-          this._hass = newHass;
-
-          // Fix card reference and re-attach content div
-          this._card = this.shadowRoot.getElementById(this._card_id);
-          this._card.appendChild(this._content);
-
-          // Set up header
-          if (!this._ispanel()) {
-            const show_header = this._config.header ? this._config.header : 'yes';
-            (this._card as any).header = show_header == 'yes'
-              ? (this._config.name ? this._config.name : 'Floor 3d') : '';
-          }
-
-          // Re-establish resize observer and z-index interval
-          this._resizeObserver = new ResizeObserver(() => this._resizeCanvasDebounce());
-          if (this._ispanel() || this._issidebar()) {
-            this._resizeObserver.observe(this._card);
-          }
-          this._zIndexInterval = window.setInterval(() => this._zIndexChecker(), 250);
-
-          // Restart animation loop if needed
-          if (this._to_animate) {
-            this._clock = new THREE.Clock();
-            this._renderer.setAnimationLoop(() => this._animationLoop());
-          }
-
-          // Resize canvas to new container dimensions (camera aspect + renderer size),
-          // then re-render so overlay positions use the updated projection.
-          this._resizeCanvas();
-          if (this._hass && this._markerOverlay) {
-            this._updateMarkersAndControls(this._hass);
-          } else {
-            this._render();
-          }
-
-          console.log('First updated end (cached)');
-          return;
-        }
-      }
-
       if (!this._content) {
         this._content = document.createElement('div');
         this._content.style.width = '100%';
