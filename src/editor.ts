@@ -3212,6 +3212,17 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
               @change=${(ev) => setMarkerField('size', Number(ev.target.value) || undefined)}
             ></floor3d-textfield>
 
+            <div style="display:flex;gap:8px;">
+              <floor3d-textfield label="Offset X (px)" type="number" style="flex:1;"
+                .value=${marker.offset_x !== undefined ? String(marker.offset_x) : ''}
+                @change=${(ev) => setMarkerField('offset_x', ev.target.value !== '' ? Number(ev.target.value) : undefined)}
+              ></floor3d-textfield>
+              <floor3d-textfield label="Offset Y (px)" type="number" style="flex:1;"
+                .value=${marker.offset_y !== undefined ? String(marker.offset_y) : ''}
+                @change=${(ev) => setMarkerField('offset_y', ev.target.value !== '' ? Number(ev.target.value) : undefined)}
+              ></floor3d-textfield>
+            </div>
+
             <div>
               <div style="font-size:12px;color:var(--secondary-text-color);margin-bottom:4px;">
                 Room → Anchor mapping (one per line: <code>room_state: anchor_object_id</code>)
@@ -3415,6 +3426,17 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
               .value=${control.size !== undefined ? String(control.size) : ''}
               @change=${(ev) => setControlField('size', Number(ev.target.value) || undefined)}
             ></floor3d-textfield>
+
+            <div style="display:flex;gap:8px;">
+              <floor3d-textfield label="Offset X (px)" type="number" style="flex:1;"
+                .value=${control.offset_x !== undefined ? String(control.offset_x) : ''}
+                @change=${(ev) => setControlField('offset_x', ev.target.value !== '' ? Number(ev.target.value) : undefined)}
+              ></floor3d-textfield>
+              <floor3d-textfield label="Offset Y (px)" type="number" style="flex:1;"
+                .value=${control.offset_y !== undefined ? String(control.offset_y) : ''}
+                @change=${(ev) => setControlField('offset_y', ev.target.value !== '' ? Number(ev.target.value) : undefined)}
+              ></floor3d-textfield>
+            </div>
 
             ${control.control_type === 'service-call' ? html`
               <floor3d-textfield label="Service (e.g. light.toggle)" fullwidth
