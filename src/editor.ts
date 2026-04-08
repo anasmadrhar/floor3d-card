@@ -268,9 +268,12 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
       this._entityOptionsGroupArray.push({ ...objectGroupOptions });
     }
 
-    for (const config of this._configArray) {
-      this._entityOptionsArray.push({ ...entityOptions });
-    }
+    // Preserve existing expand states across setConfig re-calls
+    const prevEntityOpts = [...this._entityOptionsArray];
+    const isInitialEntityLoad = prevEntityOpts.length === 0;
+    this._entityOptionsArray = Array.from({ length: this._configArray.length }, (_, i) =>
+      i < prevEntityOpts.length ? prevEntityOpts[i] : { ...entityOptions, show: !isInitialEntityLoad }
+    );
 
     for (const zoomconfig of this._configZoomArray) {
       this._entityOptionsZoomArray.push({ ...zoomAreaOptions });
@@ -659,112 +662,79 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
       return [html``];
     }
 
-    const options = this._options.entities;
-    if (!this._entity_ids) {
-      this._entity_ids = Object.keys(this.hass.states).sort(function (a, b) {
-        return a.toLowerCase().localeCompare(b.toLowerCase());
-      });
-    }
     const valueElementArray: TemplateResult[] = [];
-    for (const config of this._configArray) {
-      const index = this._configArray.indexOf(config);
+    for (let index = 0; index < this._configArray.length; index++) {
+      const config = this._configArray[index];
+      const itemOptions: any = this._entityOptionsArray[index] || { show: false };
+
       valueElementArray.push(html`
-        <div class="sub-category" style="display: flex; flex-direction: row; align-items: center;">
-          <div style="display: flex; align-items: center; flex-direction: column;">
-            <div
-              style="font-size: 10px; margin-bottom: -8px; opacity: 0.5;"
-              @click=${this._toggleThing}
-              .options=${options.options.entities[index]}
-              .optionsTarget=${options.options.entities}
-              .index=${index}
-            >
-              options
+        <div style="border:1px solid var(--divider-color,#ccc);border-radius:4px;padding:8px;">
+          <!-- Header row -->
+          <div style="display:flex;align-items:center;cursor:pointer;user-select:none;"
+               @click=${this._toggleItemExpand} .__expandOpts=${itemOptions}>
+            <ha-icon icon="mdi:chevron-${itemOptions.show ? 'up' : 'down'}" style="pointer-events:none;"></ha-icon>
+            <span style="margin-left:8px;font-weight:500;pointer-events:none;">${config.entity || `Entity ${index + 1}`}</span>
+            <span style="margin-left:8px;opacity:0.6;font-size:12px;pointer-events:none;">${config.type3d || ''}</span>
+            <div style="margin-left:auto;display:flex;align-items:center;">
+              <ha-icon class="ha-icon-large" icon="mdi:arrow-up"
+                style="${index === 0 ? 'opacity:0.25;pointer-events:none;' : 'cursor:pointer;'}"
+                .configDirection=${'up'}
+                .configArray=${this._config!.entities}
+                .arrayAttribute=${'entities'}
+                .arraySource=${this._config}
+                .index=${index}
+                @click=${(ev) => { ev.stopPropagation(); if (index > 0) this._moveEntity(ev); }}
+              ></ha-icon>
+              <ha-icon class="ha-icon-large" icon="mdi:arrow-down"
+                style="${index === this._configArray.length - 1 ? 'opacity:0.25;pointer-events:none;' : 'cursor:pointer;'}"
+                .configDirection=${'down'}
+                .configArray=${this._config!.entities}
+                .arrayAttribute=${'entities'}
+                .arraySource=${this._config}
+                .index=${index}
+                @click=${(ev) => { ev.stopPropagation(); if (index < this._configArray.length - 1) this._moveEntity(ev); }}
+              ></ha-icon>
+              <ha-icon class="ha-icon-large" icon="mdi:delete"
+                style="color:var(--error-color,red);cursor:pointer;"
+                .configAttribute=${'entity'}
+                .configArray=${'entities'}
+                .configIndex=${index}
+                @click=${(ev) => { ev.stopPropagation(); this._removeEntity(ev); }}
+              ></ha-icon>
             </div>
-            <ha-icon
-              icon="mdi:chevron-${options.options.entities[index].show ? 'up' : 'down'}"
-              @click=${this._toggleThing}
-              .options=${options.options.entities[index]}
-              .optionsTarget=${options.options.entities}
-              .index=${index}
-            ></ha-icon>
           </div>
-          <div class="values" style="flex-grow: 1;">
-            ${this._entity_ids.length * this._configArray.length < 5000
-              ? html` <floor3d-select
-                  label="Entity (Required)"
-                  .value=${config.entity}
-                  @selected=${this._valueChanged}
-                  .configAttribute=${'entity'}
-                  .configObject=${this._configArray[index]}
-                  .ignoreNull=${false}
-                  @closed=${(ev) => ev.stopPropagation()}
-                  fixedMenuPosition
-                  naturalMenuWidth
-                  required
-                  id="entity"
-                >
-                  ${this._entity_ids.map((entity) => {
-                    return html` <mwc-list-item .value=${entity}>${entity}</mwc-list-item> `;
-                  })}
-                </floor3d-select>`
-              : html`
-                  <floor3d-textfield
-                    label="Entity"
-                    @input=${this._valueChanged}
-                    .configAttribute=${'entity'}
-                    .configObject=${this._configArray[index]}
-                    .value=${config.entity ? config.entity : ''}
-                  >
-                  </floor3d-textfield>
-                `}
-          </div>
-          ${index !== 0
-            ? html`
-                <ha-icon
-                  class="ha-icon-large"
-                  icon="mdi:arrow-up"
-                  @click=${this._moveEntity}
-                  .configDirection=${'up'}
-                  .configArray=${this._config!.entities}
-                  .arrayAttribute=${'entities'}
-                  .arraySource=${this._config}
-                  .index=${index}
-                ></ha-icon>
-              `
-            : html` <ha-icon icon="mdi:arrow-up" style="opacity: 25%;" class="ha-icon-large"></ha-icon> `}
-          ${index !== this._configArray.length - 1
-            ? html`
-                <ha-icon
-                  class="ha-icon-large"
-                  icon="mdi:arrow-down"
-                  @click=${this._moveEntity}
-                  .configDirection=${'down'}
-                  .configArray=${this._config!.entities}
-                  .arrayAttribute=${'entities'}
-                  .arraySource=${this._config}
-                  .index=${index}
-                ></ha-icon>
-              `
-            : html` <ha-icon icon="mdi:arrow-down" style="opacity: 25%;" class="ha-icon-large"></ha-icon> `}
-          <ha-icon
-            class="ha-icon-large"
-            icon="mdi:close"
-            @click=${this._removeEntity}
-            .configAttribute=${'entity'}
-            .configArray=${'entities'}
-            .configIndex=${index}
-          ></ha-icon>
+
+          <!-- Expanded content -->
+          ${itemOptions.show ? html`
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+              <ha-selector
+                .hass=${this.hass}
+                .selector=${{ entity: {} }}
+                .value=${config.entity || ''}
+                .label=${'Entity (Required)'}
+                @value-changed=${(ev) => {
+                  const newConfigArray = [...this._configArray];
+                  newConfigArray[index] = { ...newConfigArray[index], entity: ev.detail.value };
+                  this._configArray = newConfigArray;
+                  this._config.entities = this._configArray;
+                  fireEvent(this, 'config-changed', { config: this._config });
+                }}
+              ></ha-selector>
+
+              ${this._createTypeElement(index)}
+              ${this._createLightElement(index)}
+              ${this._createRoomElement(index)}
+              ${this._createColorConditionElement(index)}
+              ${this._createHideElement(index)}
+              ${this._createShowElement(index)}
+              ${this._createTextElement(index)}
+              ${this._createGestureElement(index)}
+              ${this._createDoorElement(index)}
+              ${this._createCoverElement(index)}
+              ${this._createRotateElement(index)}
+            </div>
+          ` : ''}
         </div>
-        ${options.options.entities[index].show
-          ? html`
-              <div class="options">
-                ${this._createTypeElement(index)} ${this._createLightElement(index)} ${this._createRoomElement(index)}
-                ${this._createColorConditionElement(index)} ${this._createHideElement(index)}
-                ${this._createShowElement(index)} ${this._createTextElement(index)} ${this._createGestureElement(index)}
-                ${this._createDoorElement(index)} ${this._createCoverElement(index)} ${this._createRotateElement(index)}
-              </div>
-            `
-          : ''}
       `);
     }
     return valueElementArray;
@@ -862,18 +832,18 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
         </div>
         ${options.show
           ? html`
-              <div class="card-background" style="max-height: 400px; overflow: auto;">
+              <div class="card-options" style="display:flex;flex-direction:column;gap:8px;">
                 ${this._createEntitiesValues()}
-                <div class="sub-category" style="display: flex; flex-direction: column; align-items: flex-end;">
-                  <ha-icon
-                    class="ha-icon-large"
-                    icon="mdi:plus"
-                    .configArray=${this._configArray}
-                    .configAddValue=${'entity'}
-                    .sourceArray=${this._config.entities}
-                    @click=${this._addEntity}
-                  ></ha-icon>
-                </div>
+                <ha-icon
+                  class="ha-icon-large"
+                  icon="mdi:plus"
+                  style="cursor:pointer;align-self:flex-start;"
+                  .configArray=${this._configArray}
+                  .configAddValue=${'entity'}
+                  .sourceArray=${this._config.entities}
+                  @click=${this._addEntity}
+                  title="Add entity"
+                ></ha-icon>
               </div>
             `
           : ''}
