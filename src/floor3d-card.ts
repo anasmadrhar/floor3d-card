@@ -586,10 +586,13 @@ export class Floor3dCard extends LitElement {
             this._renderer.setAnimationLoop(() => this._animationLoop());
           }
 
-          // Re-render once to pick up position changes and sync overlay
-          this._render();
+          // Resize canvas to new container dimensions (camera aspect + renderer size),
+          // then re-render so overlay positions use the updated projection.
+          this._resizeCanvas();
           if (this._hass && this._markerOverlay) {
             this._updateMarkersAndControls(this._hass);
+          } else {
+            this._render();
           }
 
           console.log('First updated end (cached)');
