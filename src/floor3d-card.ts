@@ -1477,7 +1477,7 @@ export class Floor3dCard extends LitElement {
 
       // Long-press touch listeners for mobile object-ID discovery
       this._content.addEventListener('touchstart', (e: TouchEvent) => this._discoverTouchStart(e), { passive: true });
-      this._content.addEventListener('touchmove', () => this._discoverTouchCancel(), { passive: true });
+      this._content.addEventListener('touchmove', (e: TouchEvent) => this._discoverTouchCancel(e), { passive: true });
       this._content.addEventListener('touchend', () => this._discoverTouchCancel(), { passive: true });
 
       this._setCamera();
@@ -3350,13 +3350,24 @@ export class Floor3dCard extends LitElement {
     const t = e.touches[0];
     this._discoverTouchOrigin = { x: t.clientX, y: t.clientY, e };
     this._discoverLongPressTimeout = setTimeout(() => {
-      if (!this._discoverTouchOrigin) return;
+      // Save origin before cancel (cancel sets _discoverTouchOrigin to null)
+      const origin = this._discoverTouchOrigin;
       this._discoverTouchCancel();
-      this._discoverObjectAtTouch(this._discoverTouchOrigin.e);
+      if (!origin) return;
+      this._discoverObjectAtTouch(origin.x, origin.y);
     }, 700);
   }
 
-  private _discoverTouchCancel(): void {
+  private _discoverTouchCancel(ev?: TouchEvent): void {
+    if (ev && this._discoverTouchOrigin) {
+      // Cancel only if finger moved more than 12px (ignore micro-vibrations)
+      const t = ev.touches[0] || ev.changedTouches[0];
+      if (t) {
+        const dx = t.clientX - this._discoverTouchOrigin.x;
+        const dy = t.clientY - this._discoverTouchOrigin.y;
+        if (dx * dx + dy * dy < 144) return; // 12px threshold
+      }
+    }
     if (this._discoverLongPressTimeout) {
       clearTimeout(this._discoverLongPressTimeout);
       this._discoverLongPressTimeout = null;
@@ -3364,8 +3375,11 @@ export class Floor3dCard extends LitElement {
     this._discoverTouchOrigin = null;
   }
 
-  private _discoverObjectAtTouch(e: any): void {
-    const intersects = this._getintersect(e.touches ? e.touches[0] : e);
+  private _discoverObjectAtTouch(clientX: number, clientY: number): void {
+    // Convert clientX/Y to offsetX/Y relative to the canvas container
+    const rect = this._content.getBoundingClientRect();
+    const fakeEvent = { offsetX: clientX - rect.left, offsetY: clientY - rect.top };
+    const intersects = this._getintersect(fakeEvent);
     if (intersects.length > 0 && intersects[0].object.name) {
       const name = intersects[0].object.name;
       this._copyToClipboardAndToast(name, 'Object ID');
