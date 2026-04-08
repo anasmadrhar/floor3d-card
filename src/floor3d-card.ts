@@ -3266,7 +3266,8 @@ export class Floor3dCard extends LitElement {
 
     let htmlHeight: string;
     if (this._ispanel()) htmlHeight = 'calc(100vh - var(--header-height))';
-    else htmlHeight = 'auto';
+    else if (this._config.height) htmlHeight = this._config.height + 'px';
+    else htmlHeight = '400px';
 
     return html`
       <ha-card

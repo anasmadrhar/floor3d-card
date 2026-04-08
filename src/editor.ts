@@ -1071,7 +1071,15 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
           ? html`
              <div class="card-options" style="display: flex; flex-direction: column; align-items: left;">
                 <floor3d-textfield
-                  label="Style"
+                  label="Card Height (px, default 400)"
+                  type="number"
+                  .value=${config.height ? String(config.height) : ''}
+                  .configObject=${config}
+                  .configAttribute=${'height'}
+                  @input=${this._valueChanged}
+                ></floor3d-textfield>
+                <floor3d-textfield
+                  label="Style (CSS override)"
                   .value=${config.style ? config.style : ''}
                   .configObject=${config}
                   .configAttribute=${'style'}
@@ -3163,10 +3171,8 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
 
             <floor3d-select label="Type"
               .value=${marker.type || 'avatar'}
-              @selected=${(ev) => {
-                const v = ev.target.value;
-                if (v && v !== (marker.type || 'avatar')) setMarkerField('type', v);
-              }}
+              @change=${(ev) => setMarkerField('type', (ev.target as any).value)}
+              @closed=${(ev) => ev.stopPropagation()}
             >
               <mwc-list-item value="avatar">Avatar (image)</mwc-list-item>
               <mwc-list-item value="person">Person entity (auto-avatar)</mwc-list-item>
@@ -3390,10 +3396,8 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
 
             <floor3d-select label="Control Type"
               .value=${control.control_type || 'toggle'}
-              @selected=${(ev) => {
-                const v = ev.target.value;
-                if (v && v !== (control.control_type || 'toggle')) setControlField('control_type', v);
-              }}
+              @change=${(ev) => setControlField('control_type', (ev.target as any).value)}
+              @closed=${(ev) => ev.stopPropagation()}
             >
               <mwc-list-item value="toggle">Toggle (on/off)</mwc-list-item>
               <mwc-list-item value="more-info">More Info</mwc-list-item>
