@@ -274,6 +274,10 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
     this._entityOptionsArray = Array.from({ length: this._configArray.length }, (_, i) =>
       i < prevEntityOpts.length ? prevEntityOpts[i] : { ...entityOptions, show: !isInitialEntityLoad }
     );
+    // Keep the options reference in sync so _createTypeElement etc. work for newly added items
+    if (this._options?.entities?.options) {
+      this._options.entities.options.entities = this._entityOptionsArray;
+    }
 
     for (const zoomconfig of this._configZoomArray) {
       this._entityOptionsZoomArray.push({ ...zoomAreaOptions });
@@ -838,10 +842,7 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
                   class="ha-icon-large"
                   icon="mdi:plus"
                   style="cursor:pointer;align-self:flex-start;"
-                  .configArray=${this._configArray}
-                  .configAddValue=${'entity'}
-                  .sourceArray=${this._config.entities}
-                  @click=${this._addEntity}
+                  @click=${this._addEntityItem}
                   title="Add entity"
                 ></ha-icon>
               </div>
@@ -1383,16 +1384,17 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
       return;
     }
     const target = ev.target;
+    const removeIndex: number = target.configIndex;
     const entitiesArray: Floor3dCardConfig[] = [];
     let index = 0;
     for (const config of this._configArray) {
-      if (target.configIndex !== index) {
+      if (removeIndex !== index) {
         entitiesArray.push(config);
       }
       index++;
     }
-    const newConfig = { [target.configArray]: entitiesArray };
-    this._config = Object.assign(this._config, newConfig);
+    this._entityOptionsArray.splice(removeIndex, 1);
+    this._config.entities = entitiesArray;
     fireEvent(this, 'config-changed', { config: this._config });
   }
 
@@ -2989,6 +2991,15 @@ export class Floor3dCardEditor extends LitElement implements LovelaceCardEditor 
   // ---------------------------------------------------------------------------
   // Markers editor
   // ---------------------------------------------------------------------------
+
+  private _addEntityItem(): void {
+    if (!this._config) return;
+    const newEntity = { entity: '' };
+    const newConfigArray = [...this._configArray, newEntity];
+    this._configArray = newConfigArray;
+    this._config.entities = newConfigArray;
+    fireEvent(this, 'config-changed', { config: this._config });
+  }
 
   private _addMarker(): void {
     if (!this._config) return;
