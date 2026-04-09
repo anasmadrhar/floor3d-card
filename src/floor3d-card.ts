@@ -142,6 +142,7 @@ export class Floor3dCard extends LitElement {
   private _config!: Floor3dCardConfig;
   private _configArray: Floor3dCardConfig[] = [];
   private _object_ids?: Floor3dCardConfig[] = [];
+  private _visibilityChangeHandler?: () => void;
   private _overlay: HTMLDivElement;
   private _hass?: HomeAssistant;
   private _haShadowRoot: any;
@@ -211,6 +212,19 @@ export class Floor3dCard extends LitElement {
   public connectedCallback(): void {
     super.connectedCallback();
 
+    // Re-register visibility listener (handles Android app-switch context loss).
+    this._visibilityChangeHandler = () => {
+      if (document.hidden || !this._modelready || !this._renderer) return;
+      const gl = this._renderer.getContext();
+      if (gl && gl.isContextLost()) {
+        console.log('floor3d-card: WebGL context lost on visibility restore, reloading');
+        this.display3dmodel();
+      } else if (!this._to_animate) {
+        this._render();
+      }
+    };
+    document.addEventListener('visibilitychange', this._visibilityChangeHandler);
+
     if (this._modelready) {
       if (this._ispanel() || this._issidebar()) {
         this._resizeObserver.observe(this._card);
@@ -222,6 +236,11 @@ export class Floor3dCard extends LitElement {
       if (this._to_animate) {
         this._clock = new THREE.Clock();
         this._renderer.setAnimationLoop(() => this._animationLoop());
+      } else {
+        // Non-animated cards: repaint the static scene after reconnect.
+        // The drawing buffer is cleared when the canvas is detached; nothing
+        // repaints it unless we explicitly call _render().
+        this._render();
       }
 
       if (this._ispanel() || this._issidebar()) {
@@ -232,6 +251,11 @@ export class Floor3dCard extends LitElement {
 
   public disconnectedCallback(): void {
     super.disconnectedCallback();
+
+    if (this._visibilityChangeHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityChangeHandler);
+      this._visibilityChangeHandler = undefined;
+    }
 
     this._resizeObserver.disconnect();
     window.clearInterval(this._zIndexInterval);
@@ -564,7 +588,9 @@ export class Floor3dCard extends LitElement {
         const oldCard = _floor3dCachedCard.instance;
         _floor3dCachedCard = null;
 
-        if (oldCard._modelready && oldCard._content && oldCard._renderer) {
+        const cachedGl = oldCard._renderer?.getContext?.();
+        const contextOk = cachedGl && !cachedGl.isContextLost();
+        if (oldCard._modelready && oldCard._content && oldCard._renderer && contextOk) {
           console.log('floor3d-card: restoring from cache');
 
           // Save values that must come from the NEW instance.
@@ -1403,6 +1429,19 @@ export class Floor3dCard extends LitElement {
     // create and initialize renderer
 
     this._renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true, alpha: true });
+
+    // Handle WebGL context loss (e.g. Android backgrounding reclaims GPU).
+    this._renderer.domElement.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault(); // allow the browser to attempt restoration
+      console.log('floor3d-card: WebGL context lost');
+      if (this._to_animate) this._renderer?.setAnimationLoop(null);
+      this._modelready = false;
+    }, false);
+    this._renderer.domElement.addEventListener('webglcontextrestored', () => {
+      console.log('floor3d-card: WebGL context restored, reloading model');
+      this.display3dmodel();
+    }, false);
+
     this._maxtextureimage = this._renderer.capabilities.maxTextures;
     console.log('Max Texture Image Units: ' + this._maxtextureimage);
     console.log('Max Texture Image Units: number of lights casting shadow should be less than the above number');
