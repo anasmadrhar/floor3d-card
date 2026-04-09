@@ -45,6 +45,30 @@ class ModelSource {
   public static GLB = 1;
 }
 
+// Properties that belong to the new element's lifecycle — must NOT be overwritten
+// during a cache-restore (Lit internals are excluded by name pattern below).
+const CACHE_SKIP = new Set([
+  'renderRoot', 'shadowRoot', 'isConnected',
+  // new element's DOM references
+  '_card', '_card_id', '_resizeObserver', '_zIndexInterval',
+  // event-listener closures bound to the old element
+  '_performActionListener', '_mousedownEventListener',
+  '_mouseupEventListener', '_changeListener',
+  // set from document / new element's constructor
+  '_haShadowRoot', '_eval',
+  // transient input/selection state — reset naturally
+  '_clickStart', '_longpressTimeout', '_discoverLongPressTimeout',
+  '_discoverTouchOrigin', '_currentIntersections', '_cardObscured', '_resizeTimeout',
+  // selection state — reset by setConfig
+  '_selectedmaterial', '_selectedobjects', '_selectionModeEnabled', '_initialobjectmaterials',
+  // always set from new config/hass after restore
+  '_config', '_configArray', '_object_ids', '_hass',
+]);
+
+// Module-level cache: keeps the loaded 3D state alive when HA destroys the
+// preview element during editor config changes, so the model doesn't reload.
+let _floor3dCachedCard: { key: string; instance: any } | null = null;
+
 // TODO Name your custom element
 @customElement('floor3d-card')
 export class Floor3dCard extends LitElement {
@@ -211,7 +235,17 @@ export class Floor3dCard extends LitElement {
 
     this._resizeObserver.disconnect();
     window.clearInterval(this._zIndexInterval);
-    if (this._to_animate) {
+
+    if (this._modelready && this._renderer) {
+      // Keep the loaded model alive for a potential immediate re-creation
+      // (HA destroys and recreates the preview card on every config-changed).
+      const key = `${this._config?.path || ''}|${this._config?.objfile || ''}|${this._config?.mtlfile || ''}`;
+      _floor3dCachedCard = { key, instance: this };
+      if (this._to_animate) {
+        this._clock = null;
+        this._renderer.setAnimationLoop(null);
+      }
+    } else if (this._to_animate && this._renderer) {
       this._renderer.setAnimationLoop(null);
     }
   }
@@ -522,6 +556,72 @@ export class Floor3dCard extends LitElement {
 
     this._card = this.shadowRoot.getElementById(this._card_id);
     if (this._card) {
+      // Check if a recently disconnected instance with the same model is cached.
+      // HA destroys and recreates the preview element on every config-changed event;
+      // restoring state from cache avoids a full model reload from disk.
+      const modelKey = `${this._config?.path || ''}|${this._config?.objfile || ''}|${this._config?.mtlfile || ''}`;
+      if (_floor3dCachedCard && _floor3dCachedCard.key === modelKey && this._config) {
+        const oldCard = _floor3dCachedCard.instance;
+        _floor3dCachedCard = null;
+
+        if (oldCard._modelready && oldCard._content && oldCard._renderer) {
+          console.log('floor3d-card: restoring from cache');
+
+          // Save values that must come from the NEW instance.
+          const newConfig = this._config;
+          const newConfigArray = this._configArray;
+          const newObjectIds = this._object_ids;
+          const newHass = this._hass;
+
+          // Transfer only floor3d-specific state via an explicit allowlist.
+          // Skipping Lit internals (_$*) and CACHE_SKIP prevents corrupting the
+          // new element's reactive lifecycle.
+          for (const prop of Object.getOwnPropertyNames(oldCard)) {
+            if (prop.startsWith('_$') || CACHE_SKIP.has(prop)) continue;
+            try { (this as any)[prop] = (oldCard as any)[prop]; } catch (_) { /* read-only */ }
+          }
+
+          // Restore new-instance-specific values.
+          this._config = newConfig;
+          this._configArray = newConfigArray;
+          this._object_ids = newObjectIds;
+          this._hass = newHass;
+
+          // Re-attach content to new ha-card.
+          this._card = this.shadowRoot.getElementById(this._card_id);
+          this._card.appendChild(this._content);
+
+          if (!this._ispanel()) {
+            const show_header = this._config.header ? this._config.header : 'yes';
+            (this._card as any).header = show_header == 'yes'
+              ? (this._config.name ? this._config.name : 'Floor 3d') : '';
+          }
+
+          // Re-establish per-instance observers/timers.
+          this._resizeObserver = new ResizeObserver(() => this._resizeCanvasDebounce());
+          if (this._ispanel() || this._issidebar()) {
+            this._resizeObserver.observe(this._card);
+          }
+          this._zIndexInterval = window.setInterval(() => this._zIndexChecker(), 250);
+
+          if (this._to_animate) {
+            this._clock = new THREE.Clock();
+            this._renderer.setAnimationLoop(() => this._animationLoop());
+          }
+
+          // Recalibrate camera/renderer to the new container, then re-apply state.
+          this._resizeCanvas();
+          if (this._hass && this._markerOverlay) {
+            this._updateMarkersAndControls(this._hass);
+          } else {
+            this._render();
+          }
+
+          console.log('floor3d-card: cache restore complete');
+          return;
+        }
+      }
+
       if (!this._content) {
         this._content = document.createElement('div');
         this._content.style.width = '100%';
