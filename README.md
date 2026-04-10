@@ -1,531 +1,835 @@
-# floor3d-card (aka Your Home Digital Twin)
+# Floor3D Card — Your Home as a Digital Twin
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
+[![GitHub release](https://img.shields.io/github/release/adizanni/floor3d-card.svg?style=for-the-badge)](https://github.com/adizanni/floor3d-card/releases)
 
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/AndyHA)
+Render an interactive 3D model of your home directly in a Lovelace card and bind every object in the scene to a Home Assistant entity — lights, doors, covers, sensors, cameras, and more. Walk through your digital twin and control your home in real time.
 
-Javascript Module for the Home Assistant visualization Card for 3D Models with bindings to entity states.
-
-| New Tutorial [![Alt text](https://img.youtube.com/vi/ArBy7uqSJkY/0.jpg)](https://www.youtube.com/watch?v=ArBy7uqSJkY) | Your First Card [![Alt text](https://img.youtube.com/vi/4qrDpDnPK6I/0.jpg)](https://youtu.be/4qrDpDnPK6I)  |
-| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-
+---
 
 ## Installation
 
-The card is now accepted in the default repositories of HACS just search for floor3d in the HACS frontend section and install.
+### HACS (recommended)
 
-You can also download the compiled floor3d-card.js file from the latest release here (https://github.com/adizanni/floor3d-card/releases) and upload it to your www Home Assistant folder
-
-It's **required** to load this card as `module`.
+Search for **floor3d** in **HACS → Frontend** and install. After installing, add the card resource:
 
 ```yaml
-- url: /local/pathtofile/floor3d-card.js
-  type: module
+# configuration.yaml  (or via Settings → Dashboards → Resources)
+lovelace:
+  resources:
+    - url: /hacsfiles/floor3d-card/floor3d-card.js
+      type: module
 ```
 
-See Home Assistant documentation for adding custom cards (https://developers.home-assistant.io/docs/frontend/custom-ui/custom-card) and registering JavaScript resources (https://developers.home-assistant.io/docs/frontend/custom-ui/registering-resources).
+### Manual
 
-## Model Design and Installation
+Download `floor3d-card.js` from the [latest release](https://github.com/adizanni/floor3d-card/releases) and place it in `/config/www/`. Then add the resource:
 
-Use a 3D modeling software. As you have to model your home I would suggest this software (the one I tested): http://www.sweethome3d.com/.
-Model your home with all needed objects and furniture (I will post here some hints on how to better design your home for best results with the custom card).
-For further instruction I assume you will use SweetHome3D.
-At the end of your modeling, you need to export the files in obj format using '3D View \ Export to OBJ format ...', specify the folder where you want to store the output (be careful there are multiple files)
-Copy the full set of files (minimum is the .obj file and .mtl file) to a sub folder of /config/www in Home assistant.
-Be aware that when you remove objects from the model the object ids get reassigned: This means that after a modification and re-export of your model it is possible you need to redo the bindings with the new object names. The new feature (https://github.com/adizanni/floor3d-card/issues/7) is now available in this repository https://github.com/adizanni/ExportToHASS. It is a new plugin for Sweethome3D. It is still very experimental, use at your own risk, and please follow the instructions.
-It could be also good practice to make the objects invisble instead of removing them (not yet tested if this solution preserves the objects ids).
+```yaml
+lovelace:
+  resources:
+    - url: /local/floor3d-card.js
+      type: module
+```
 
-If you want to have an object that groups together other objects (ex a mannequin is composed by 100s of objects you want to treat it as one), you can follow this trick: https://community.home-assistant.io/t/live-3d-floor-plan-with-interactive-objects/301549/78?u=adizanni.
+---
 
-Based on some feedback there are some open issues which I will try to fix, please follow these rules if you want things to go smooth:
+## Preparing Your 3D Model
 
-- Place the upper left corner of your 2D floor model at 0,0 coordinates otherwise the camera setting will work weirdly (due to calculation on the coordinates that I need to fix)
+### Recommended tool — SweetHome3D
 
-When you are finished, configure a new card (either in panel mode or regular) with the following options:
+[SweetHome3D](http://www.sweethome3d.com/) is free and works well. Model your home, then export via **3D View → Export to OBJ format**. Copy the resulting files (`*.obj`, `*.mtl`, textures) to a subfolder of `/config/www/`.
 
-### Note: GLB format
+### GLB format (faster)
 
-If you want to generate a glb file instead of the wavefront (obj) file to load the card (it is faster and more optimized), you can follow this procedure in Windows:
-Install nodejs here https://nodejs.org/dist/v16.14.2/node-v16.14.2-x64.msi
-Once installed you can open a command prompt (or powershell) and type the following command:
+Convert the OBJ export to a single binary GLB file for faster loading:
+
 ```bash
 npm install -g obj2gltf
-```
-Then (always in the same command prompt) you just have the full wavefront obj model (either created with the builtin function or with my plugin) to a folder (obj, mtl, pictures), move to the folder (cd <folder>) and type the following command:
-```bash
 obj2gltf --checkTransparency -i home.obj -o home.glb
 ```
-Assuming your model is called home.obj. You wait for some time (from few seconds to minutes) and when it is completed you can take the glb file and copy it to the www folder of Home Assistant. It is a self containing binary object so you just need that one file to load the model.
 
-## Options
+Copy only `home.glb` to `/config/www/`. No `.mtl` or texture files needed.
 
-| Name             | Type   | Default      | Description                                                                                                                                                                |
-| ---------------- | ------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| type             | string | **Required** | `custom:floor3d-card`.                                                                                                                                                     |
-| name             | string | Floor 3d     | the name of the card.                                                                                                                                                      |
-| entities         | array  | none         | list of enitities to bind to 3D model objects.                                                                                                                             |
-| object_groups    | array  | none         | list of object groups to apply grouped entity bindings.                                                                                                                    |
-| style            | string | none         | the style that will be applied to the canvas element of the card.                                                                                                          |
-| path             | string | **Required** | path to the Waterforont obj (objects), mtl (material) and other files.                                                                                                     |
-| objfile          | string | **Required** | object file name (.obj) for Waterfront format or glb file name for the binary (condensed) 3d format (still experimental).                                                                                                                                 |
-| mtlfile          | string | **Required** | material file name (.mtl) Waterfront format. Only relevant when objefile has obj extension (no glb)                                                                                                                               |
-| backgroundColor  | string | '#aaaaaa'    | canvas background color: #RGB notation (ex #aaaaaa), color name (ex. 'white') or 'transparent' for a transparent background                                       |
-| header  | string | 'yes'    | if the header will be displayed or not                                                                                                                                                   |
-| editModeNotifications | string | 'yes'    | 'yes' to use the double click in edit mode to pop up the object ids or the camera position, 'no' to stop displaying popups                                            | 
-| selectionMode | string | 'no'    | 'yes' to activate the selection mode and select group of objects, the list of selected objects will appear in the console                                            |
-| globalLightPower | float  | 0.5          | intensity of the light illuminating the full scene it can also the name of a numeric sensor                                                                                |
-| shadow           | string | no           | 'yes' if lights cast shadow on object. This is realistic but impacts performances. By default wall, floors and objects with "door" in the name, receives and cast shadows  |
-| extralightmode   | string | no           | 'yes' to activate the extra light mode. In this mode the max number of light who cast shadow at the same time (max texture unit image) is limited to the light that are switched with performance penalties  |
-| overlay          | string | no           | 'yes' if you want to show an overlay panel for displaying data on the objects on click                                                                                     |
-| click            | string | no           | 'yes' if you want to enable the click event. This will automatically disable the double click, you can manage the click behaviour at entity level via the action parameter |
-| lock_camera      | string | no           | 'yes' to stop the zoom and rotate camera actions on the model                                                                                                              |
-| show_axes        | string | no           | 'yes' to show the axes in the scene. It can help define the direction vector for the spotlight                                                                              |
-| sky              | string | no           | 'yes' to show a sky a ground and a sun to reproduce a photorealistic home representation with sun position determined by the sun.sun entity                                 |
-| north            | string | see desc     | north is the direction of the north on the x-z plane. ex. {x: 0, z: 1} (this is the default) for a north in the z positive direction (see axes explanation). Goes with sky yes |
-| overlay\_<style> | string | various      | allow to manage the aspect of the overlay panel (colors, fonts, etc.)                                                                                                      |
+### Tips
 
-**Note: with the introdction of the sky, the illumination will behave strangely when the sun will go above the ceiling. I've given the possibility to manage what I call a transparent slab. In sweethome3d put a transparent slab object (transparent box) on top of your floor and call it transparent_slab*. If you use my plugin (Export to HA) this will be managed by the card by stopping the sunlight to come through from the above. It is also possible to activate the ceiling in Sweethome3d. **
+- Place the upper-left corner of your floor plan at **0, 0** in the modeling tool for correct camera behaviour.
+- Use the [ExportToHASS SweetHome3D plugin](https://github.com/adizanni/ExportToHASS) to preserve object IDs across re-exports.
+- To find object IDs: load the card with no entity bindings, then **double-click** any object in edit mode — a popup shows its ID and the current camera position.
 
-**Note 2: a valid north setting example:
+---
+
+## Basic Card Configuration
+
 ```yaml
+type: custom:floor3d-card
+name: My Home
+path: /local/my_home/          # folder containing the model files
+objfile: home.glb              # .glb (recommended) or .obj
+# mtlfile: home.mtl            # only needed for .obj format
+height: 500                    # card height in pixels (default 400)
+backgroundColor: '#aaaaaa'
+globalLightPower: '0.8'
+header: 'yes'
+shadow: 'no'
+lock_camera: 'no'
+```
+
+### Top-Level Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | **required** | `custom:floor3d-card` |
+| `name` | string | `Floor 3d` | Card title |
+| `path` | string | **required** | URL path to the folder holding model files |
+| `objfile` | string | **required** | Model filename (`.glb` or `.obj`) |
+| `mtlfile` | string | — | Material file (`.obj` models only) |
+| `height` | number | `400` | Card height in pixels |
+| `backgroundColor` | string | `#aaaaaa` | Canvas background: hex color, color name, or `transparent` |
+| `globalLightPower` | number/string | `0.5` | Ambient light intensity (0–1) or a numeric sensor entity ID |
+| `header` | `yes`/`no` | `yes` | Show the card title bar |
+| `shadow` | `yes`/`no` | `no` | Enable light shadows (impacts performance) |
+| `extralightmode` | `yes`/`no` | `no` | Limit simultaneous shadow-casting lights to the GPU maximum |
+| `lock_camera` | `yes`/`no` | `no` | Disable orbit / zoom / pan |
+| `click` | `yes`/`no` | `no` | Enable click events on 3D objects |
+| `show_axes` | `yes`/`no` | `no` | Show X/Y/Z axes (useful when setting up spotlights) |
+| `sky` | `yes`/`no` | `no` | Render sky, ground, and sun driven by `sun.sun` |
+| `north` | object | `{x:0, z:1}` | North direction on the X-Z plane (used with `sky: yes`) |
+| `editModeNotifications` | `yes`/`no` | `yes` | Double-click popups in edit mode |
+| `selectionMode` | `yes`/`no` | `no` | Select multiple objects (IDs logged to console) |
+| `hideLevelsMenu` | `yes`/`no` | `no` | Hide the floor-level selector |
+| `initialLevel` | number | — | Level index shown on load |
+| `style` | string | — | Inline CSS applied to the `ha-card` element |
+
+---
+
+## Camera
+
+### Setting the default camera position
+
+In edit mode, double-click an empty area of the model to log the current camera YAML to the console and clipboard. Paste into your config:
+
+```yaml
+camera_position:
+  x: 609.3
+  y: 905.5
+  z: 376.6
+camera_rotate:
+  x: -1.093
+  y: 0.520
+  z: 0.764
+camera_target:
+  x: 37.4
+  y: 18.6
+  z: -82.6
+```
+
+---
+
+## Zoom Areas
+
+Zoom areas let you jump the camera to a specific room. The card smoothly animates the camera fly-to (750 ms cubic ease-in-out).
+
+```yaml
+zoom_areas:
+  - name: living_room           # unique name — also the input_select option value
+    object_id: LivingRoom_floor # 3D object used to calculate the zoom target
+    distance: 600               # camera distance from the target (cm)
+    direction:                  # camera approach vector
+      x: 0
+      y: 1
+      z: 0
+    level: 0                    # (optional) show this level when zoomed in
+
+  - name: kitchen
+    object_id: Kitchen_floor
+    distance: 400
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | **required** | Unique zoom area identifier |
+| `object_id` | string | **required** | 3D object that defines the zoom target |
+| `distance` | number | `500` | Camera distance from target in model units |
+| `direction` | object | `{x:0,y:1,z:0}` | Camera approach direction vector |
+| `level` | number | — | Show this floor level when zoom is active |
+
+### Hiding the zoom selector UI
+
+```yaml
+hide_zoom_areas_ui: 'yes'   # hides the bottom-left zoom dropdown
+```
+
+### Controlling zoom from Home Assistant (zoom_entity)
+
+Bind zoom to an `input_select` helper so automations and other cards can both **read and set** the current zoom:
+
+```yaml
+zoom_entity: input_select.floor3d_zoom
+```
+
+**How it works:**
+- When the `input_select` state changes → card flies to the matching zoom area.
+- When the user clicks a zoom button in the card → the `input_select` is updated.
+- Set the state to `reset` to return to the default camera position.
+
+**Setting up the helper** (Settings → Helpers → Add → Dropdown):
+- Options: one per zoom area `name`, plus `reset`
+
+**Triggering from a Button card:**
+```yaml
+type: button
+name: Living Room
+tap_action:
+  action: call-service
+  service: input_select.select_option
+  data:
+    entity_id: input_select.floor3d_zoom
+    option: living_room
+```
+
+**Automation — zoom to occupied room:**
+```yaml
+alias: Follow room presence
+trigger:
+  - platform: state
+    entity_id: input_select.anas_room
+action:
+  - service: input_select.select_option
+    data:
+      entity_id: input_select.floor3d_zoom
+      option: "{{ trigger.to_state.state }}"
+```
+
+---
+
+## Entity Bindings
+
+Bind 3D objects to Home Assistant entities via the `entities` list.
+
+```yaml
+entities:
+  - entity: light.living_room
+    type3d: light
+    object_id: LivingRoom_ceiling_lamp
+    light:
+      lumens: 800
+      decay: 1
+      distance: 300
+```
+
+### Common entity fields
+
+| Field | Type | Description |
+|---|---|---|
+| `entity` | string | HA entity ID (or `<object_group>` reference) |
+| `type3d` | string | Binding type — see sections below |
+| `object_id` | string | 3D object name in the model |
+| `entity_template` | string | JS template: `'[[[ if ($entity > 25) { "hot" } ]]]'` |
+| `action` | string | On-click: `more-info`, `overlay`, or `default` |
+
+---
+
+### Light
+
+Illuminates a point in the scene. Tracks brightness, color, and color temperature.
+
+```yaml
+- entity: light.kitchen
+  type3d: light
+  object_id: Kitchen_pendant
+  light:
+    lumens: 600          # max brightness (0–4000)
+    color: '#ffddaa'     # static color (overridden by HA color attrs)
+    decay: 1             # light falloff rate (0–2)
+    distance: 400        # effect radius in model units
+    shadow: 'no'         # override global shadow for this light
+    vertical_alignment: top   # top/middle/bottom — avoids lamp blocking itself
+    light_target: TV_screen   # makes it a spotlight aimed at this object
+```
+
+---
+
+### Hide / Show
+
+Hide or reveal a 3D object based on entity state.
+
+```yaml
+- entity: binary_sensor.front_door
+  type3d: hide
+  object_id: FrontDoor_open_state
+  hide:
+    state: 'off'         # hide the object when entity state equals this
+
+- entity: binary_sensor.rain
+  type3d: show
+  object_id: Umbrella
+  show:
+    state: 'on'          # show the object when entity state equals this
+```
+
+---
+
+### Color
+
+Paint a 3D object a different color depending on entity state.
+
+```yaml
+- entity: sensor.living_room_temp
+  type3d: color
+  object_id: Thermometer
+  entity_template: '[[[ if ($entity > 25) { "hot" } else { "cool" } ]]]'
+  colorcondition:
+    - state: hot
+      color: '#ff4444'
+    - state: cool
+      color: '#4444ff'
+```
+
+---
+
+### Text
+
+Render entity state as text on a flat plane object (TV screen, picture frame, display).
+
+```yaml
+- entity: sensor.living_room_temp
+  type3d: text
+  object_id: TempDisplay_plane
+  text:
+    span: 60%
+    font: verdana
+    textbgcolor: '#000000'
+    textfgcolor: '#ffffff'
+    attribute: temperature   # optional — show an attribute instead of state
+```
+
+---
+
+### Door
+
+Animate a door or window opening and closing.
+
+```yaml
+- entity: binary_sensor.front_door
+  type3d: door
+  object_id: FrontDoor
+  door:
+    doortype: swing          # swing or slide
+    direction: inner         # inner or outer (swing only)
+    side: left               # up/down/left/right — hinge side
+    degrees: 90              # open angle (swing) or percentage (slide)
+    hinge: FrontDoor_hinge   # object_id of the hinge (optional)
+    pane: FrontDoor_pane     # object_id of the moving panel (optional)
+```
+
+---
+
+### Cover
+
+Animate covers (blinds, roller shutters) based on `current_position` attribute.
+
+```yaml
+- entity: cover.living_room_blind
+  type3d: cover
+  object_id: LivingRoom_blind
+  cover:
+    doortype: slide
+    side: up
+    direction: inner
+    percentage: 100
+```
+
+---
+
+### Rotate
+
+Continuously rotate an object (fans, turbines, etc.).
+
+```yaml
+- entity: fan.ceiling_fan
+  type3d: rotate
+  object_id: CeilingFan_blades
+  rotate:
+    axis: y
+    round_per_second: 2
+```
+
+---
+
+### Room
+
+Highlight a room with a translucent parallelepiped and an optional state label.
+
+```yaml
+- entity: sensor.living_room_motion
+  type3d: room
+  object_id: LivingRoom_floor_room
+  room:
+    elevation: 240
+    transparency: 60
+    color: '#aaffaa'
+    label: 'yes'
+    span: 50%
+    font: verdana
+    textbgcolor: '#00000000'
+    textfgcolor: '#ffffff'
+  colorcondition:
+    - state: 'on'
+      color: '#ff0000'
+    - state: 'off'
+      color: '#00ff00'
+```
+
+---
+
+### Gesture
+
+Call a service when a 3D object is double-clicked.
+
+```yaml
+- entity: switch.coffee_maker
+  type3d: gesture
+  object_id: CoffeeMaker
+  gesture:
+    domain: switch
+    service: toggle
+```
+
+---
+
+### Camera
+
+Show a camera feed popup when an object is double-clicked.
+
+```yaml
+- entity: camera.front_door
+  type3d: camera
+  object_id: FrontDoor_camera_mount
+```
+
+---
+
+## Object Groups
+
+Group multiple objects so they respond to one entity binding. Reference a group with `<group_name>` syntax.
+
+```yaml
+object_groups:
+  - object_group: LivingRoomLights
+    objects:
+      - object_id: Lamp_1
+      - object_id: Lamp_2
+      - object_id: Lamp_3
+
+entities:
+  - entity: light.living_room
+    type3d: light
+    object_id: <LivingRoomLights>
+    light:
+      lumens: 800
+```
+
+---
+
+## Overlay Panel
+
+Show entity name and state in a floating panel when objects are clicked.
+
+```yaml
+overlay: 'yes'
+click: 'yes'
+overlay_bgcolor: 'rgba(0,0,0,0.6)'
+overlay_fgcolor: '#ffffff'
+overlay_alignment: top-left   # top-left, top-right, bottom-left, bottom-right
+overlay_width: '33'           # percentage of card width
+overlay_height: '20'          # percentage of card height
+overlay_font: verdana
+overlay_fontsize: 14px
+
+entities:
+  - entity: sensor.living_room_temp
+    type3d: color
+    object_id: Thermometer
+    action: overlay             # clicking shows state in the overlay panel
+```
+
+---
+
+## Anchors
+
+Named anchors attach logical positions to 3D objects. Markers, room controls, and animations all reference anchors.
+
+```yaml
+anchors:
+  - id: living_room_center      # logical name used by markers/controls/animations
+    object_id: LivingRoom_floor # any object in the scene
+  - id: kitchen_center
+    object_id: Kitchen_island
+  - id: ac_unit_living
+    object_id: AC_unit_living_room
+```
+
+---
+
+## Markers
+
+Markers render floating HTML elements above 3D anchors to show where people, pets, or devices are. They animate smoothly between rooms when the entity state changes.
+
+### Marker types
+
+| Type | Description |
+|---|---|
+| `person` | Round avatar from a `person.*` entity (uses entity picture) |
+| `avatar` | Round image from a custom URL |
+| `icon` | MDI icon |
+| `dot` | Filled circle |
+| `badge` | Label badge |
+
+### Example — person marker
+
+```yaml
+anchors:
+  - id: living_room_center
+    object_id: LivingRoom_floor
+  - id: kitchen_center
+    object_id: Kitchen_floor
+
+markers:
+  - id: anas_marker
+    entity: input_select.anas_current_room   # state = current room name
+    type: person
+    person_entity: person.anas               # pulls picture + name
+    size: 52
+    hide_states:
+      - not_home
+      - unknown
+    rooms:
+      living_room: living_room_center        # entity state → anchor id
+      kitchen: kitchen_center
+      bedroom: bedroom_center
+```
+
+### Example — device icon marker
+
+```yaml
+markers:
+  - id: robot_vacuum
+    entity: input_select.vacuum_room
+    type: icon
+    icon: mdi:robot-vacuum
+    color: '#4fc3f7'
+    size: 40
+    rooms:
+      living_room: living_room_center
+      kitchen: kitchen_center
+    visible_when:
+      entity: vacuum.roborock
+      state_not: docked
+```
+
+### Marker options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `id` | string | **required** | Unique identifier |
+| `entity` | string | **required** | Entity whose state is the current room name |
+| `type` | string | **required** | `person`, `avatar`, `icon`, `dot`, or `badge` |
+| `person_entity` | string | — | `person.*` entity (for `type: person`) |
+| `image` | string | — | Image URL (for `type: avatar`) |
+| `icon` | string | — | MDI icon name (for `type: icon`) |
+| `color` | string | — | CSS color |
+| `size` | number | `48` | Marker size in pixels |
+| `rooms` | map | **required** | `room_state_value: anchor_id` mapping |
+| `hide_states` | list | — | States that hide the marker |
+| `visible_when` | condition | — | Additional visibility condition |
+| `action` | string | `more-info` | Click action: `more-info` or `none` |
+| `z_offset` | number | `0` | Vertical shift in model units |
+| `offset_x` | number | `0` | Screen-space X offset in pixels |
+| `offset_y` | number | `0` | Screen-space Y offset in pixels |
+
+---
+
+## Room Controls
+
+Floating icon buttons anchored to 3D positions for quick room-level control.
+
+```yaml
+room_controls:
+  - id: living_lights_btn
+    anchor: living_room_center   # anchor id from the anchors list
+    entity: light.living_room
+    control_type: toggle
+    icon: mdi:lightbulb
+    color_on: '#ffdd55'
+    color_off: 'rgba(255,255,255,0.3)'
+    size: 44
+    z_offset: 50
+
+  - id: living_media_btn
+    anchor: living_room_center
+    entity: media_player.living_room_tv
+    control_type: more-info
+    icon: mdi:television
+    size: 44
+    offset_x: 56              # stack horizontally next to first button
+```
+
+### Control types
+
+| Type | Description |
+|---|---|
+| `toggle` | Calls `homeassistant.toggle` on click |
+| `more-info` | Opens the more-info dialog |
+| `service-call` | Calls a custom `service` with `service_data` |
+| `scene-select` | Activates a scene entity |
+| `media-toggle` | Plays / pauses a media player |
+
+### Room control options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `id` | string | **required** | Unique identifier |
+| `anchor` | string | **required** | Anchor ID from `anchors` |
+| `entity` | string | **required** | HA entity to reflect and control |
+| `control_type` | string | **required** | See table above |
+| `icon` | string | — | MDI icon name |
+| `label` | string | — | Text label |
+| `size` | number | `40` | Button size in pixels |
+| `color_on` | string | — | CSS color when entity is active |
+| `color_off` | string | — | CSS color when entity is inactive |
+| `service` | string | — | Service to call (for `service-call` type) |
+| `service_data` | map | — | Data passed to the service |
+| `visible_when` | condition | — | Visibility condition |
+| `z_offset` | number | `0` | Vertical shift in model units |
+| `offset_x` | number | `0` | Screen-space X offset in pixels |
+| `offset_y` | number | `0` | Screen-space Y offset in pixels |
+
+---
+
+## Room Animations
+
+Animated overlays anchored to 3D positions — music notes above speakers, airflow from AC units.
+
+### Music notes
+
+Shows animated floating ♪♫ notes above an anchor when a media player is playing.
+
+```yaml
+animations:
+  - id: living_room_music
+    type: music_notes
+    entity: media_player.living_room_speaker
+    anchor: living_room_center
+    active_state: playing      # default: 'playing'
+    color: 'rgba(255,215,80,0.95)'
+    z_offset: 80
+```
+
+### AC airflow
+
+Shows expanding arc ripples from an AC unit. Color changes automatically with HVAC mode (cool / heat / fan-only).
+
+```yaml
+animations:
+  - id: living_ac_flow
+    type: ac_flow
+    entity: climate.living_room_ac
+    anchor: ac_unit_living
+    direction: down-right      # see direction options below
+    color_cool: 'rgba(100,200,255,0.85)'
+    color_heat: 'rgba(255,130,50,0.85)'
+    color_fan:  'rgba(220,220,220,0.7)'
+    z_offset: 20
+```
+
+#### Direction options
+
+| Value | Visual |
+|---|---|
+| `up` | Arcs drift upward |
+| `down` | Arcs drift downward |
+| `left` | Arcs drift left |
+| `right` | Arcs drift right |
+| `up-left` | Circles drift diagonally up-left |
+| `up-right` | Circles drift diagonally up-right |
+| `down-left` | Circles drift diagonally down-left |
+| `down-right` | Circles drift diagonally down-right (ideal for wall-mounted units) |
+
+### Animation options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `id` | string | **required** | Unique identifier |
+| `type` | string | **required** | `music_notes` or `ac_flow` |
+| `entity` | string | **required** | HA entity driving the animation |
+| `anchor` | string | **required** | Anchor ID from `anchors` |
+| `active_state` | string | `playing` | State that activates the animation (music_notes) |
+| `color` | string | golden | Note color (music_notes) |
+| `direction` | string | `up` | Airflow direction (ac_flow) |
+| `color_cool` | string | blue | Particle color in cooling mode |
+| `color_heat` | string | orange | Particle color in heating mode |
+| `color_fan` | string | grey | Particle color in fan-only mode |
+| `z_offset` | number | `0` | Vertical shift in model units |
+| `offset_x` | number | `0` | Screen-space X nudge in pixels |
+| `offset_y` | number | `0` | Screen-space Y nudge in pixels |
+| `visible_when` | condition | — | Visibility condition |
+
+---
+
+## Visibility Conditions
+
+`visible_when` can be used on markers, room controls, and animations. It supports simple leaf conditions and compound AND/OR logic.
+
+### Leaf condition
+
+```yaml
+visible_when:
+  entity: binary_sensor.someone_home
+  state: 'on'
+```
+
+Available operators: `state`, `state_not`, `state_in`, `state_not_in`.
+
+### Compound condition (AND)
+
+```yaml
+visible_when:
+  and:
+    - entity: input_boolean.show_markers
+      state: 'on'
+    - entity: person.anas
+      state_not: not_home
+```
+
+### Compound condition (OR)
+
+```yaml
+visible_when:
+  or:
+    - entity: sensor.mode
+      state: home
+    - entity: sensor.mode
+      state: guest
+```
+
+---
+
+## Sky and Sun
+
+Render a realistic sky, ground, and sun position based on `sun.sun`.
+
+```yaml
+sky: 'yes'
 north:
   x: -1
   z: 0
 ```
 
-For each entity in the entities list you need to specify the following options:
+Add a transparent slab object in SweetHome3D named `transparent_slab*` to prevent sunlight from shining through the ceiling.
 
-| Name            | Type   | Default      | Description                                                                                                                                                                                                                                                                                         |
-| --------------- | ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| entity          | string | **Required** | your entity id or reference to an object_group via <object_group> reference (this last feature is not applicable for text and gesture                                                                                                                                                               |
-| entity_template | string | none         | a JavaScript template formatted as follow: [[[ template]]]. Template is a valid Javascript command. With $entity you specify the state of the entity                                                                                                                                                |
-| action          | string | none         | on-click behaviour: it can be 'more-info' to open the more-info dialog for the entity associated to the clicked objec; it can be 'overlay' to display the state of the entity in the ovelay panel; it can be 'default' to do the same action that used to be associated to the double click action. |
-| object_id       | string | **Required** | the name of the object in the model to bind to your entity.                                                                                                                                                                                                                                        |
-| type3d          | string | **Required** | the type of object binding. Values are: light, hide, color, text, gesture, door, rotate                                                                                                                                                                                                             |
+---
 
-**Note: to facilitate the configuration you can load the model without entity bindings and you will be able to show the object_id you want to bind to by double clicking on the object**
-
-For each object_group in object_groups:
-
-| Name         | Type   | Default      | Description                                                                                                                             |
-| ------------ | ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| object_group | string | **Required** | your object group name to be referenced by the entity field via <object_group> reference (braces <> have to wrap the object_group name) |
-| objects      | array  | **Required** | the list of object_ids in your group.                                                                                                   |
-
-The objects array contains a list of
-| Name | Type | Default | Description
-| ---- | ---- | ------- | -----------
-| object_id | string | **Required** | object_id of the object in the group
-
-Here is a Tutorial for Object Groups:
-
-| Object Groups Tutorial
-| -------------------------
-| [![Alt text](https://img.youtube.com/vi/eAbaDfNw93M/0.jpg)](https://www.youtube.com/watch?v=eAbaDfNw93M)
-
-For each zoom in zoom_areas
-
-| Name             | Type   | Default      | Description                                                                                                                                                                |
-| ---------------- | ------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| zoom             | string | **Required** | the name of the zoom area (ex. Kitchen).                                                                                                                                    |
-| object_id        | string | **Required** | the object id of the target of the zoom (ex. room_1_1)                                                                                                                      |
-| rotation         | object | {x:0, y:0, z:0} | the rotation of the camera pointing to the area.                                                                                                                                                      |
-| direction        | object  | {x:0, y:0, z:0}   | the direction vector of the canera pointing to the area.                                                                                                                             |
-| distance        | number  | 500   | the number of cm from the camera to the target point                                                                                              |
-| level        | number  | - | the index of the level. If set, selecting this zoom level will show the level and hide the other levels.                                                                                 |
-
-
-### Client Side Javascript template example
+## Full Configuration Example
 
 ```yaml
-- entity: sensor.temperature
-  type3d: color
-  colorcondition:
-    - color: red
-      state: hot
-  object_id: your_object
-  entity_template: '[[[ if ($entity > 25) { "hot" } else { "cool" } ]]]'
-```
+type: custom:floor3d-card
+name: Home
+path: /local/my_home/
+objfile: home.glb
+height: 550
+backgroundColor: '#cccccc'
+globalLightPower: '0.7'
+header: 'yes'
+shadow: 'no'
+lock_camera: 'no'
+hide_zoom_areas_ui: 'no'
+zoom_entity: input_select.floor3d_zoom
 
-The example above shows a potential usage of the Client Side Javascript template example. If the state of the entity is greater than 25, the templated state of the entity will be 'hot' thus the object 'your_object' will become red
-
-## Camera Rotation, Camera Position and Camera direction
-
-For **camera rotation and position** recording config:
-
-```yaml
 camera_position:
-  x: <x coordinate of the recorded camera positioon>
-  y: <y coordinate of the recorded camera positioon>
-  z: <z coordinate of the recorded camera positioon>
-camera_rotate:
-  x: <x coordinate of the recorded camera rotation>
-  y: <y coordinate of the recorded camera rotation>
-  z: <z coordinate of the recorded camera rotation>
- camera_target:
-  x: <x coordinate of the recorded camera target>
-  y: <y coordinate of the recorded camera target>
-  z: <z coordinate of the recorded camera target>
-```
+  x: 609.3
+  y: 905.5
+  z: 376.6
+camera_target:
+  x: 37.4
+  y: 18.6
+  z: -82.6
 
-When in edit mode you can double click in an empty model space to retrieve the current postition and rotation of the camera. You can retrieve the 2 sets of coordinates from the prompt box that will appear. You can then manually copy the content and paste to the card config in code editor mode. Thanks to this the new default position of the camera will be set to the configured coordinates.
+zoom_areas:
+  - name: living_room
+    object_id: LivingRoom_floor
+    distance: 500
+  - name: kitchen
+    object_id: Kitchen_floor
+    distance: 400
 
-An image explaining the coordinate concepts:
+anchors:
+  - id: living_room_center
+    object_id: LivingRoom_floor
+  - id: kitchen_center
+    object_id: Kitchen_floor
+  - id: ac_unit_living
+    object_id: AC_LivingRoom
 
-![image](https://user-images.githubusercontent.com/35622920/152559923-c8762f2d-c8c6-4cd2-bbc8-8429b8fa7101.png)
+markers:
+  - id: anas
+    entity: input_select.anas_room
+    type: person
+    person_entity: person.anas
+    size: 52
+    hide_states: [not_home, unknown]
+    rooms:
+      living_room: living_room_center
+      kitchen: kitchen_center
 
-## Overlay and action
+room_controls:
+  - id: living_lights
+    anchor: living_room_center
+    entity: light.living_room
+    control_type: toggle
+    icon: mdi:lightbulb
+    color_on: '#ffdd55'
+    color_off: 'rgba(255,255,255,0.25)'
+    size: 44
+    z_offset: 60
 
-You first put overlay yes in the Appearance section of the card visual editor. Then a few other Overlay parameters appear to customize the overlay: alignment, size, fonts, colors, etc.
-All this will create a panel that will sit on top of the model canvas.
-You will also have to put the click parameter to yes for it to work.
-Then in each entity you have the action parameter; this tells what to do when you click on the object associated to the entity.
-If action = overlay for an entity, it means that when you click on it, it will display the name and state of the entity inside the overlay.
+animations:
+  - id: living_music
+    type: music_notes
+    entity: media_player.living_room
+    anchor: living_room_center
+    active_state: playing
+    z_offset: 90
+  - id: living_ac
+    type: ac_flow
+    entity: climate.living_room_ac
+    anchor: ac_unit_living
+    direction: down-right
+    z_offset: 20
 
-Example:
-
-```yaml
-........
-overlay: 'yes'
-overlay_bgcolor: transparent
-.........
-click: 'yes'
 entities:
-  - entity: <your_entity>
-    object_id: <your_object_id>
-    action: overlay
-    .........
-```
-
-When you click on the object, the entity name and state will appear in the overlay panel
-
-In this other example the click will trigger the pop of the more-info dialog (overlay not needed):
-
-```yaml
-
-.........
-click: 'yes'
-entities:
-  - entity: <your_entity>
-    object_id: <your_object_id>
-    action: more-info
-    .........
-```
-
-## Camera
-
-For camera, example config:
-
-```yaml
-entities
-  - entity: camera.<camera name>
-    type3d: camera
-    object_id: <an object_id in the model you want to associate with the camera>
-```
-there are no specific parameters. Double clicking on the object will show a pop-up dialog with the camera picture.
-
-## Lights
-
-For **light** example config:
-
-```yaml
-entities:
-  - entity: <a light entity id>
+  - entity: light.kitchen
     type3d: light
-    object_id: <an object id in the 3D model you want to postion the light on>
+    object_id: Kitchen_lamp
     light:
-      lumens: <max light lumens range: 0-4000 for regular led/bulb lights>
-      color: <light color, if the light is a led with variable color this parameter will be ignored in favor of color and temperature attributes>
-      decay: <0-2, the speed of decay for the light between the light source and the distance>
-      distance: <number of cm for which the light will have an effect on the scene>
-      shadow: <'no', if you do not want this light to case a shadow. This is to cope with the limit of max lights casting shadow in a model>
-      vertical_alignment: <'top', 'middle', 'bottom', when you activate shadows it allows to avoid that the lamp itself block the light>
-      light_target: when this parameter is filled, the light becomes a spotlight, you need to put here the object_id of the target of the spot
-      light_direction: when this parameter is filled, the light becomes a spotlight, you put here the direction vector of the spotlight. It can only be changed in the code editor. in the format x: xxx, y: yyy, z: zzz. See coordinate explanation above
-```
-
-Light behaviour is obvious: the **light_name** will illuminate when the bound entity in Home Assistant will be turned on and viceversa. If the light has color and brightness attributes they will be used to render the light.
-A double click on the light object will toggle the light (so far the events in iOS and Android are not yet managed as the events are captured by the OrbitContol of Three.js library and I have not yet fully understood the behaviour)
-
-## Hide
-
-For **hide** example config:
-
-```yaml
-entities
-  - entity: <a binary sensor entity id>
-    type3d: hide
-    object_id: <an object_id in the model you want to hide if condition is true>
-    hide:
-      state: <the state of the entity triggering the hiding of the object: ex 'off'>
-```
-
-Hide behavour: the object_id will be hidden when the state of the bound entity will be equal to the **state** value
-
-## Show
-
-For **show** example config:
-
-```yaml
-entities
-  - entity: <a binary sensor entity id>
-    type3d: show
-    object_id: <an object_id in the model you want to show if condition is true>
-    show:
-      state: <the state of the entity triggering the showing of the object: ex 'off'>
-```
-
-Show behavour: the object_id will be visible when the state of the bound entity will be equal to the **state** value
-
-## Color
-
-For **color** example config:
-
-```yaml
-entities:
-  - entity: <a discrete sensor entity id>
-    type3d: color
-    object_id: <the object id in the 3D model that has to change color based on the state of the entity>
-    colorcondition:
-      - color: <color to paint if condition for the entity id in the stat to be true, it can be in Hex, html or rgb format (ex. '#ff0000' or 'red' or '255, 0, 0' >
-        state: <state of the entity>
-      .......
-```
-
-Color behavour: the object_id will be painted in the color when the state of the bound entity will be equal to the **state** value
-
-## Text
-
-For **text** example config:
-
-```yaml
-entities:
-  - entity: <a numeric or text sensor entity id>
-    type3d: text
-    object_id: <the plane object id in the 3D model that will allow the display of the state text>
-    text:
-      span: <percentage span of text in the object plane> (ex. 50%)
-      font: <name of the font text ex:'verdana'>
-      textbgcolor: <background color for the text. ex: '#000000' or 'black'>
-      textfgcolor: <foreground color for the text. ex: '#ffffff' or 'white'>
-      attribute: the optional attribute of the entity you want to show on the object
-      .......
-```
-
-Text behaviour: the object_id representing the plane object (ex. mirror; picture, tv screen, etc) will display the state text for the entity
-
-## Room
-
-For **room** example config:
-
-```yaml
-entities:
-  - entity: <an entity>
-    type3d: room
-    object_id: <a room object (generally the floor) with a name containing "room". >
-    room:
-      eleveation: <Number of cm going from the floor to the ceiling to set the parallelepiped height of the new room object>
-      transparency: <Percentage of transparency of the room object>
-      color: <color of the parallelipiped: ex: '#ff0000' or 'red'>
-      label: <yes or no, default no: shows a label with the state of the entity or attribute (see below)>
-      span: <percentage span of text in the object plane> (ex. 50%)
-      font: <name of the font text ex:'verdana'>
-      textbgcolor: <background color for the text. ex: '#000000' or 'black'>
-      textfgcolor: <foreground color for the text. ex: '#ffffff' or 'white'>
-      attribute: the optional attribute of the entity you want to show on the object
-    colorcondition:
-      - color: <>
-        state: <>
-
-```
-
-Room will draw a parallelipiped highlighting the room. Pretty static for the moment, it will become more dynamic with new parameters. It works with all room (floor) objects containing the word "room" in the object name. Rooms that have not a rectangular shape will have a paralllipiped anyway (not managing complex shapes).
-
-You can add a colorcondition section for rooms.
-
-![image](https://user-images.githubusercontent.com/35622920/153704069-f0be858f-5453-4a7c-a592-2c33d44284d0.PNG)
-
-## Gesture
-
-For **gesture** (action) example config:
-
-```yaml
-entities:
-  - entity: <an actionable entity>
-    type3d: gesture
-    object_id: <an object id in the 3D model you want to double click to trigger the gesture/action>
-    gesture:
-      domain: <the domain of the service to call>
-      service: <the service to call>
-```
-
-when you double click on the object, the domain.service is called with data { entity_id: entity }
-(so far the iOS and Android events are not yet managed as the events are captured by the OrbitContol of Three.js library and I have not yet fully understood the behaviour)
-
-## Door
-
-For **door** example config:
-
-```yaml
-entities:
-  - entity: <a on/off  entity>
+      lumens: 600
+      decay: 1
+      distance: 350
+  - entity: binary_sensor.front_door
     type3d: door
-    object_id: <an object or object_group id representing the door>
+    object_id: FrontDoor
     door:
-      doortype: <'slide' for sliding doors/windows, 'swing' for swinging doors windows>
-      side: 'up', 'down', 'left' and 'right', the border of the door that is the axis of rotation
-      direction: 'inner' and 'outer', the direction of rotation
-      hinge: the object_id of the door/window hinge
-      pane: the object_id of the pane (main component) of the door/window
-      degrees: the degrees of the door opening
+      doortype: swing
+      direction: inner
+      side: left
+      degrees: 90
 ```
 
-a door/window object/entity is rotated by the sepcified degrees (swing) or slid (slide) along the axis defined in 'side' and the direction defined in 'direction'. You can use the object group to list the moving objects of the door. If you do that you can now select the hinge object or the pane object. When you select the hinge object only the direction parameter is used as the side and axix of rotation are bound to the hinge position and shape. Time allowing I will try to do a tutorial. It is getting complex.....
+---
 
-Different cases here:
+## Credits
 
-For a Swing door:
+Original card by [adizanni](https://github.com/adizanni/floor3d-card).  
+Room-aware smart home features (markers, room controls, animations, zoom entity, diagonal AC wind) added by [anasmadrhar](https://github.com/anasmadrhar).
 
-| Type                   | Direction | Side | Degrees | Comment                                                           |
-| ---------------------- | --------- | ---- | ------- | ----------------------------------------------------------------- |
-| hinge object specified | x         |      | x       | -                                                                 |
-| pane object specified  | x         | x    | x       | -                                                                 |
-| no object specified    | x         | x    | x       | the object_id is taken as a pane or the first object of the group |
-
-For a slide door (only pane object):
-
-| Type                     | Direction | Side | Percentage | Comment                                                           |
-| ------------------------ | --------- | ---- | ---------- | ----------------------------------------------------------------- |
-| pane object specified    | x         | x    | x          | -                                                                 |
-| no pane object specified | x         | x    | x          | the object_id is taken as a pane or the first object of the group |
-
-Example of configuration for a window (Double French Window) exported using the ExportToHass plugin:
-
-![image](https://user-images.githubusercontent.com/35622920/132490828-37eed144-d86b-4ef0-93ec-4be5d8131da5.png)
-
-The entity section:
-
-```yaml
-- entity: your_domain.your_door_entity
-  object_id: <WindowDiningRoomLeft>
-  type3d: door
-  door:
-    doortype: swing
-    direction: inner
-    degrees: '50'
-    hinge: WindowDiningRoomLeft_4
-```
-
-And the related object group:
-
-```yaml
-- object_group: WindowDiningRoomLeft
-  objects:
-    - object_id: WindowDiningRoomLeft_7
-    - object_id: WindowDiningRoomLeft_6
-    - object_id: WindowDiningRoomLeft_5
-```
-
-Result:
-
-![image](https://user-images.githubusercontent.com/35622920/132490500-b6b40948-5f5b-4127-9d8e-5ae580c1e880.png)
-
-![image](https://user-images.githubusercontent.com/35622920/132490620-0dcf2614-4b28-40e5-ab9e-d01453e37d90.png)
-
-## Cover
-
-```yaml
-entities:
-  - entity: <cover.your_cover_entity>
-    type3d: cover
-    object_id: <object_id or group of the moving parts of the cover, the blades and base of a roller shutter>
-    cover:
-      pane: <object_id represents the moving parts that have to fully disappear when the cover is fully opened>
-      side: <up or down, direction of opening
-```
-
-It is an experimental implementation of cover entities.
-
-![image](https://user-images.githubusercontent.com/35622920/154579836-8cc59d3c-f8e1-439d-a088-58d514fcf170.png)
-
-![image](https://user-images.githubusercontent.com/35622920/154579949-189ef2e4-bfc5-4701-8967-1811a8426d0c.png)
-
-
-## Rotate
-
-For **rotate** example config:
-
-```yaml
-entities:
-  - entity: <a on/off  entity>
-    type3d: rotate
-    object_id: <an object or object group id representing the thing to be rotated>
-    rotate:
-      axis: <'x', 'y' and 'z', along which axis the object should rotate>
-      round_per_seconds: 1-4, speed of rotation. Use a negative number to spin the other direction.
-      percentage:
-      hinge: the object acting as a pivot when you use an object group to represent the moving parts.
-```
-
-an object to rotate (animation) when the associated entity will be 'on'. If you use an object group and you specify the hinge, all moving parts in the group will rotate aroung the hinge center point.
-
-## Object group example
-
-```yaml
-entities:
-  - entity: light.bulb
-    type3d: light
-    object_id: <lamp> (refers to the object_group defined below, braces <> have to wrap the object_group name)
-    light:
-      lumen: 900
-object_groups:
-  - object_group: lamp
-    objects:
-      - object_id: lamp_base_20
-      - object_id: lamp_bulb_1
-```
-
-### Example
-
-To give it a try please, load the example folder files in a folder within /config/www of your Home Assistant.
-Create a new Panel View add Floor3d-card and cut and paste the following config:
-
-```yaml
-type: 'custom:floor3d-card'
-entities:
-  - entity: <your light entity id>
-    type3d: light
-    object_id: sweethome3d_opening_on_hinge_2_LampSide_31
-    light:
-      lumens: 500
-  - entity: <your binary sensor entity id (example a magnet sensor for a window)>
-    type3d: color
-    object_id: sweethome3d_window_pane_on_hinge_1_50
-    colorcondition:
-      - state: 'on'
-        color: '#00ff00'
-      - state: 'off'
-        color: '#ff0000'
-path: /local/home2/
-objfile: MyExampleHome2.obj
-mtlfile: MyExampleHome2.mtl
-backgroundColor: '#000001'
-globalLightPower: 0.4
-```
-
-### Working with levels (> v1.3.0)
-
-If your Sweethome3d model has levels and you use the ExportToHass ([Download](https://github.com/adizanni/ExportToHASS/releases/latest/download/ExportToHASSPlugin.sh3p)) plugin, the card will show the levels with some buttons appearing at the top left of the 3d canvas. There is one button for each level and one butto for "all" levels. When you click on the button of the level, only that level will become visible in the card, and if you click on the "all" button all levels will appear in the card in a total view of your model.
-All other functionalities will work as before.
-
-### Note about GPUs
-
-For one who has a computer with 2 (or more) gpus, like in laptops with a second NVIDIA gpu, one may notice that either Chrome or Firefox actually use the internal Intel UHD Graphics instead of NVIDIA.
-That makes the rendering slow and the experience frustrating.
-Steps to dramatically improve the rendering.
-
-- A. **Firefox** In NVIDIA Control Panel 3D Settings->Manage 3D Settings->Program Settings Tab->1. Select a program to customise->Mozilla Firefox → 2. Select The preferred graphics processor->High performance NVIDIA → 3. OpenGL rendering GPU → NVIDIA; In Firefox address bar, type about:config. Search ‘webgl.disable-angle’ and set it to true (that instructs Firefox to use OpenGL).
-
-- B. **Chrome** In NVIDIA Control Panel 3D Settings->Manage 3D Settings->Program Settings Tab->1. Select a program to customise->Google Chrome-> 2. Select The preferred graphics processor->High performance NVIDIA → 3. OpenGL rendering GPU → NVIDIA; In Chrome address bar, type chrome://flags/#use-angle. Select OpenGL. Restart Chrome; In Chrome address bar, type chrome://gpu. Search for ‘GL_RENDERER’ and check if it say 'ANGLE (NVIDIA … OpenGL … ); I still experiment with ‘chrome://flags/#enable-drdc’.
-
-- C. **Edge** In NVIDIA Control Panel 3D Settings->Manage 3D Settings->Program Settings Tab->1. Select a program to customise->Edge-> 2. Select The preferred graphics processor->High performance NVIDIA → 3. OpenGL rendering GPU → NVIDIA; In Chrome address bar, type edge://flags/#use-angle. Select OpenGL. Restart Edge; I couldn’t figure out how to do it in Edge. It should be like chrome, because Edge is chromium. But for some reason it doesn’t work. Checking edge://gpu GL_RENDERER shows Direct3D11 instead of OpenGL.
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/AndyHA)
