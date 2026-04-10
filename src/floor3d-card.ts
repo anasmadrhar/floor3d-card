@@ -11,7 +11,7 @@ import {
 import './editor';
 import { HassEntity } from 'home-assistant-js-websocket';
 import { createConfigArray, createObjectGroupConfigArray, getLovelace, evaluateCondition } from './helpers';
-import type { Floor3dCardConfig, MarkerConfig, RoomControlConfig } from './types';
+import type { Floor3dCardConfig, MarkerConfig, RoomControlConfig, AnimationConfig } from './types';
 import { CARD_VERSION } from './const';
 import { localize } from './localize/localize';
 //import three.js libraries for 3D rendering
@@ -63,6 +63,10 @@ const CACHE_SKIP = new Set([
   '_selectedmaterial', '_selectedobjects', '_selectionModeEnabled', '_initialobjectmaterials',
   // always set from new config/hass after restore
   '_config', '_configArray', '_object_ids', '_hass',
+  // per-instance lifecycle handlers — must re-register on new element
+  '_visibilityChangeHandler', '_externalZoomHandler',
+  // per-instance timer maps (timeout IDs are per-instance)
+  '_markerJourneyTimeouts',
 ]);
 
 // Module-level cache: keeps the loaded 3D state alive when HA destroys the
@@ -157,10 +161,13 @@ export class Floor3dCard extends LitElement {
   private _modelready: boolean;
   private _maxtextureimage: number;
 
-  // --- Marker / room-control overlay system ---
+  // --- Marker / room-control / animation overlay system ---
   private _markerOverlay?: HTMLDivElement;
   private _markerElements: Map<string, HTMLElement> = new Map();
   private _roomControlElements: Map<string, HTMLElement> = new Map();
+  private _animationElements: Map<string, HTMLElement> = new Map();
+  private _markerJourneyTimeouts: Map<string, number> = new Map();
+  private _externalZoomHandler?: EventListener;
 
   // --- Mobile object-ID discovery (long-press) ---
   private _discoverLongPressTimeout: any = null;
@@ -225,6 +232,24 @@ export class Floor3dCard extends LitElement {
     };
     document.addEventListener('visibilitychange', this._visibilityChangeHandler);
 
+    // External zoom trigger: window.dispatchEvent(new CustomEvent('floor3d-set-zoom', { detail: { id: 'room_name' } }))
+    this._externalZoomHandler = (e: Event) => {
+      if (!this._modelready || !this._zoom || !this._camera) return;
+      const detail = (e as CustomEvent).detail;
+      const name = detail?.id || detail?.name;
+      if (!name) return;
+      if (name === 'reset') {
+        this._setCamera();
+        this._setLookAt();
+        this._controls.update();
+        this._render();
+        return;
+      }
+      const zoom = this._zoom.find((z: any) => z?.name === name);
+      if (zoom) this._flyToZoom(zoom);
+    };
+    window.addEventListener('floor3d-set-zoom', this._externalZoomHandler);
+
     if (this._modelready) {
       if (this._ispanel() || this._issidebar()) {
         this._resizeObserver.observe(this._card);
@@ -256,6 +281,12 @@ export class Floor3dCard extends LitElement {
       document.removeEventListener('visibilitychange', this._visibilityChangeHandler);
       this._visibilityChangeHandler = undefined;
     }
+    if (this._externalZoomHandler) {
+      window.removeEventListener('floor3d-set-zoom', this._externalZoomHandler);
+      this._externalZoomHandler = undefined;
+    }
+    this._markerJourneyTimeouts.forEach(id => window.clearTimeout(id));
+    this._markerJourneyTimeouts.clear();
 
     this._resizeObserver.disconnect();
     window.clearInterval(this._zIndexInterval);
@@ -1823,6 +1854,7 @@ export class Floor3dCard extends LitElement {
   }
 
   private _getZoomBar(): TemplateResult {
+    if (this._config?.hide_zoom_areas_ui === 'yes') return html``;
     if (this._levels) {
       if (this._zoom.length > 0) {
         return html`
@@ -1982,48 +2014,43 @@ export class Floor3dCard extends LitElement {
 
   private _handleZoomClick(ev): void {
     ev.stopPropagation();
-
     if (ev.target.index == -1) {
       this._setCamera();
-
       this._setLookAt();
-
       this._controls.update();
-
       this._render();
-
       return;
     }
+    this._flyToZoom(this._zoom[ev.target.index]);
+  }
 
-    const zoom = this._zoom[ev.target.index];
+  /** Smoothly fly the camera to a zoom area (position + target lerp over ~800ms). */
+  private _flyToZoom(zoom: any): void {
+    if (!zoom || !this._camera || !this._controls) return;
 
     if (zoom.level != null) {
       this._setVisibleLevel(zoom.level);
     }
 
-    this._camera.position.set(
-      this._zoom[ev.target.index].position.x,
-      this._zoom[ev.target.index].position.y,
-      this._zoom[ev.target.index].position.z,
-    );
+    const startPos = this._camera.position.clone();
+    const startTarget = this._controls.target.clone();
+    const endPos = new THREE.Vector3(zoom.position.x, zoom.position.y, zoom.position.z);
+    const endTarget = new THREE.Vector3(zoom.target.x, zoom.target.y, zoom.target.z);
+    const duration = 750; // ms
+    const startTime = performance.now();
 
-    this._camera.rotation.set(
-      this._zoom[ev.target.index].rotation.x,
-      this._zoom[ev.target.index].rotation.y,
-      this._zoom[ev.target.index].rotation.z,
-    );
-
-    this._controls.target.set(
-      this._zoom[ev.target.index].target.x,
-      this._zoom[ev.target.index].target.y,
-      this._zoom[ev.target.index].target.z,
-    );
-
-    this._camera.updateProjectionMatrix();
-
-    this._controls.update();
-
-    this._render();
+    const animate = (now: number) => {
+      if (!this._camera || !this._controls) return;
+      const t = Math.min((now - startTime) / duration, 1);
+      // ease-in-out cubic
+      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      this._camera.position.lerpVectors(startPos, endPos, ease);
+      this._controls.target.lerpVectors(startTarget, endTarget, ease);
+      this._controls.update();
+      this._render();
+      if (t < 1) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
   }
 
   private _handleLevelClick(ev): void {
@@ -3560,6 +3587,23 @@ export class Floor3dCard extends LitElement {
 
     this._markerElements.clear();
     this._roomControlElements.clear();
+    this._animationElements.clear();
+
+    // Inject CSS keyframes for room animations
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes f3d-note-float {
+        0%   { opacity: 0; transform: translateY(0) rotate(-10deg) scale(0.9); }
+        15%  { opacity: 1; }
+        85%  { opacity: 1; transform: translateY(-48px) rotate(8deg) scale(1.05); }
+        100% { opacity: 0; transform: translateY(-62px) rotate(14deg) scale(0.9); }
+      }
+      @keyframes f3d-air-up    { 0%{opacity:0;transform:translateY(0) scale(1)}   25%{opacity:.85} 75%{opacity:.85} 100%{opacity:0;transform:translateY(-42px) scale(.5)} }
+      @keyframes f3d-air-down  { 0%{opacity:0;transform:translateY(0) scale(1)}   25%{opacity:.85} 75%{opacity:.85} 100%{opacity:0;transform:translateY(42px) scale(.5)} }
+      @keyframes f3d-air-left  { 0%{opacity:0;transform:translateX(0) scale(1)}   25%{opacity:.85} 75%{opacity:.85} 100%{opacity:0;transform:translateX(-42px) scale(.5)} }
+      @keyframes f3d-air-right { 0%{opacity:0;transform:translateX(0) scale(1)}   25%{opacity:.85} 75%{opacity:.85} 100%{opacity:0;transform:translateX(42px) scale(.5)} }
+    `;
+    this._markerOverlay.appendChild(style);
 
     // Build marker elements
     if (this._config.markers) {
@@ -3576,6 +3620,15 @@ export class Floor3dCard extends LitElement {
         const el = this._createRoomControlElement(control);
         this._markerOverlay.appendChild(el);
         this._roomControlElements.set(control.id, el);
+      }
+    }
+
+    // Build animation elements
+    if (this._config.animations) {
+      for (const anim of this._config.animations) {
+        const el = this._createAnimationElement(anim);
+        this._markerOverlay.appendChild(el);
+        this._animationElements.set(anim.id, el);
       }
     }
   }
@@ -3695,6 +3748,71 @@ export class Floor3dCard extends LitElement {
     return wrapper;
   }
 
+  /** Create a room animation overlay element (music notes or AC air flow). */
+  private _createAnimationElement(anim: AnimationConfig): HTMLElement {
+    const container = document.createElement('div');
+    container.style.cssText = 'position:absolute;pointer-events:none;transform:translate(-50%,-50%);display:none;';
+
+    if (anim.type === 'music_notes') {
+      const color = anim.color || 'rgba(255,215,80,0.95)';
+      // Three notes at staggered horizontal offsets and timing
+      [['♪', -13, 0], ['♫', 1, 0.55], ['♪', 15, 1.1]].forEach(([note, xOff, delay]) => {
+        const span = document.createElement('span');
+        span.textContent = note as string;
+        span.style.cssText = [
+          'position:absolute',
+          `font-size:18px`,
+          `color:${color}`,
+          'text-shadow:0 0 5px rgba(0,0,0,0.55)',
+          `animation:f3d-note-float 1.6s ease-in-out ${delay}s infinite`,
+          `left:${xOff}px`,
+          'top:0',
+          'user-select:none',
+        ].join(';');
+        container.appendChild(span);
+      });
+
+    } else if (anim.type === 'ac_flow') {
+      const dir = anim.direction || 'up';
+      const keyframe = `f3d-air-${dir}`;
+      const isHoriz = dir === 'left' || dir === 'right';
+      // Store colors in dataset for live updates
+      container.dataset.acCool = anim.color_cool || 'rgba(100,200,255,0.85)';
+      container.dataset.acHeat = anim.color_heat || 'rgba(255,130,50,0.85)';
+      container.dataset.acFan  = anim.color_fan  || 'rgba(240,240,240,0.7)';
+      container.dataset.acKeyframe = keyframe;
+      // Five particles spread perpendicular to flow direction
+      [-14, -7, 0, 7, 14].forEach((pos, i) => {
+        const dot = document.createElement('div');
+        dot.className = 'f3d-air-dot';
+        dot.style.cssText = [
+          'position:absolute',
+          'width:5px',
+          'height:5px',
+          'border-radius:50%',
+          `background:${container.dataset.acCool}`,
+          `animation:${keyframe} 1.1s ease-in-out ${(i * 0.22).toFixed(2)}s infinite`,
+          isHoriz ? `top:${pos}px;left:0` : `left:${pos}px;top:0`,
+        ].join(';');
+        container.appendChild(dot);
+      });
+    }
+
+    return container;
+  }
+
+  /** Apply a CSS transition to a marker element for a smooth room-to-room journey. */
+  private _triggerMarkerJourney(markerId: string, el: HTMLElement): void {
+    const existing = this._markerJourneyTimeouts.get(markerId);
+    if (existing) window.clearTimeout(existing);
+    el.style.transition = 'left 0.75s cubic-bezier(0.4,0,0.2,1), top 0.75s cubic-bezier(0.4,0,0.2,1)';
+    const id = window.setTimeout(() => {
+      el.style.transition = '';
+      this._markerJourneyTimeouts.delete(markerId);
+    }, 800);
+    this._markerJourneyTimeouts.set(markerId, id);
+  }
+
   /**
    * Project a world-space position to 2D screen coordinates.
    * Returns { x, y } in pixels relative to the canvas container, and
@@ -3787,6 +3905,24 @@ export class Floor3dCard extends LitElement {
       }
     }
 
+    // Animations — positioned independently at their own anchor (no stacking with other items)
+    if (this._config.animations) {
+      for (const anim of this._config.animations) {
+        const el = this._animationElements.get(anim.id);
+        if (!el || el.style.display === 'none') continue;
+        const worldPos = this._getAnchorWorldPos(anim.anchor, anim.z_offset || 0);
+        if (!worldPos) continue;
+        const { x, y, behind } = this._projectToScreen(worldPos);
+        // Use a unique key so animations never merge into the marker/control stacking group
+        const key = `__anim_${anim.id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push({
+          el, baseX: x, baseY: y, behind,
+          size: 0, offsetX: anim.offset_x || 0, offsetY: anim.offset_y || 0,
+        });
+      }
+    }
+
     // Apply positions. When multiple items share an anchor, spread them
     // horizontally as a centered chip row; manual offset_x/y applied on top.
     for (const group of groups.values()) {
@@ -3861,6 +3997,11 @@ export class Floor3dCard extends LitElement {
           el.dataset.currentAnchor = '';
         } else {
           el.style.display = 'block';
+          // Trigger journey animation when the marker moves to a different room
+          const prevAnchor = el.dataset.currentAnchor;
+          if (prevAnchor && prevAnchor !== anchorId) {
+            this._triggerMarkerJourney(marker.id, el);
+          }
           el.dataset.currentAnchor = anchorId;
           // Position is handled by _updateOverlayPositions() called below
         }
@@ -3897,6 +4038,49 @@ export class Floor3dCard extends LitElement {
             inner.style.borderColor = isOn
               ? 'rgba(255,255,255,0.3)'
               : 'rgba(255,255,255,0.1)';
+          }
+        }
+      }
+    }
+
+    // --- Room animations (music notes, AC flow) ---
+    if (this._config.animations) {
+      for (const anim of this._config.animations) {
+        const el = this._animationElements.get(anim.id);
+        if (!el) continue;
+
+        let visible = true;
+        if (anim.visible_when) visible = evaluateCondition(hass, anim.visible_when);
+
+        const entityState = hass.states[anim.entity];
+        if (!entityState) { el.style.display = 'none'; continue; }
+
+        if (anim.type === 'music_notes') {
+          const activeState = anim.active_state || 'playing';
+          el.style.display = (visible && entityState.state === activeState) ? 'block' : 'none';
+
+        } else if (anim.type === 'ac_flow') {
+          const hvacMode   = entityState.attributes?.hvac_mode || entityState.state;
+          const hvacAction = entityState.attributes?.hvac_action;
+          const isActive   = entityState.state !== 'off'
+                          && hvacAction !== 'idle'
+                          && hvacAction !== 'off';
+          if (!visible || !isActive) {
+            el.style.display = 'none';
+          } else {
+            el.style.display = 'block';
+            // Update particle color based on hvac_mode / hvac_action
+            let color: string;
+            if (hvacMode === 'heat' || hvacAction === 'heating') {
+              color = el.dataset.acHeat || 'rgba(255,130,50,0.85)';
+            } else if (hvacMode === 'fan_only' || hvacAction === 'fan') {
+              color = el.dataset.acFan  || 'rgba(240,240,240,0.7)';
+            } else {
+              color = el.dataset.acCool || 'rgba(100,200,255,0.85)';
+            }
+            el.querySelectorAll<HTMLElement>('.f3d-air-dot').forEach(dot => {
+              dot.style.background = color;
+            });
           }
         }
       }

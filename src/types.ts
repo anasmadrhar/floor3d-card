@@ -110,6 +110,31 @@ export interface RoomControlConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Room animation config
+// ---------------------------------------------------------------------------
+
+export type AnimationType = 'music_notes' | 'ac_flow';
+
+export interface AnimationConfig {
+  id: string;                       // unique identifier
+  entity: string;                   // HA entity driving the animation
+  anchor: string;                   // 3D object name used as anchor
+  type: AnimationType;
+  z_offset?: number;                // vertical shift in world units
+  offset_x?: number;                // screen-space X nudge in px
+  offset_y?: number;                // screen-space Y nudge in px
+  visible_when?: VisibilityCondition;
+  // music_notes
+  active_state?: string;            // entity state that triggers animation (default: 'playing')
+  color?: string;                   // note color (default: golden)
+  // ac_flow
+  direction?: 'up' | 'down' | 'left' | 'right'; // airflow direction (default: 'up')
+  color_cool?: string;              // particle color for cooling mode
+  color_heat?: string;              // particle color for heating mode
+  color_fan?: string;               // particle color for fan-only mode
+}
+
+// ---------------------------------------------------------------------------
 // Original card config (extended with new fields)
 // ---------------------------------------------------------------------------
 
@@ -217,6 +242,12 @@ export interface Floor3dCardConfig {
 
   // --- New: Room controls ---
   room_controls?: RoomControlConfig[];
+
+  // --- New: Room animations ---
+  animations?: AnimationConfig[];
+
+  // --- New: Zoom control ---
+  hide_zoom_areas_ui?: string; // 'yes' hides the built-in zoom selector in the bottom-left
 }
 
 export interface EntityFloor3dCardConfig {
