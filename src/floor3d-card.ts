@@ -67,6 +67,8 @@ const CACHE_SKIP = new Set([
   '_visibilityChangeHandler', '_externalZoomHandler',
   // per-instance timer maps (timeout IDs are per-instance)
   '_markerJourneyTimeouts',
+  // zoom entity state — reset per element so the first hass update always syncs
+  '_lastZoomEntityState',
 ]);
 
 // Module-level cache: keeps the loaded 3D state alive when HA destroys the
@@ -160,6 +162,9 @@ export class Floor3dCard extends LitElement {
   _helper: THREE.DirectionalLightHelper;
   private _modelready: boolean;
   private _maxtextureimage: number;
+
+  // --- Zoom entity state tracking ---
+  private _lastZoomEntityState?: string;
 
   // --- Marker / room-control / animation overlay system ---
   private _markerOverlay?: HTMLDivElement;
@@ -677,7 +682,11 @@ export class Floor3dCard extends LitElement {
           this._resizeCanvas();
           if (this._hass && this._markerOverlay) {
             this._updateMarkersAndControls(this._hass);
-          } else {
+          }
+          // Always paint the canvas after restore — _updateMarkersAndControls
+          // only updates overlay positions; it does NOT repaint the WebGL scene.
+          // Without this, the preview stays black after every config change.
+          if (!this._to_animate) {
             this._render();
           }
 
@@ -1276,6 +1285,29 @@ export class Floor3dCard extends LitElement {
           if (torerender) {
             this._render();
           }
+
+          // --- Zoom entity watch ---
+          // When zoom_entity is configured, fly the camera to the zoom area
+          // whose name matches the entity state whenever the state changes.
+          // "reset" / "none" returns to the default view.
+          if (this._config.zoom_entity && hass.states[this._config.zoom_entity]) {
+            const newZoomState = hass.states[this._config.zoom_entity].state;
+            if (newZoomState !== this._lastZoomEntityState) {
+              this._lastZoomEntityState = newZoomState;
+              if (this._modelready && this._zoom && this._camera) {
+                if (newZoomState === 'reset' || newZoomState === 'none') {
+                  this._setCamera();
+                  this._setLookAt();
+                  this._controls.update();
+                  this._render();
+                } else {
+                  const zoom = this._zoom.find((z: any) => z?.name === newZoomState);
+                  if (zoom) this._flyToZoom(zoom, false); // false = don't write back
+                }
+              }
+            }
+          }
+
           // Update markers and room controls regardless of whether the
           // primary entity bindings changed, because their visibility
           // conditions may reference different entities.
@@ -2026,17 +2058,43 @@ export class Floor3dCard extends LitElement {
       this._setLookAt();
       this._controls.update();
       this._render();
+      // Write "reset" back to zoom_entity if configured
+      if (this._config?.zoom_entity && this._hass) {
+        this._lastZoomEntityState = 'reset';
+        this._hass.callService('input_select', 'select_option', {
+          entity_id: this._config.zoom_entity,
+          option: 'reset',
+        });
+      }
       return;
     }
     this._flyToZoom(this._zoom[ev.target.index]);
   }
 
-  /** Smoothly fly the camera to a zoom area (position + target lerp over ~800ms). */
-  private _flyToZoom(zoom: any): void {
+  /**
+   * Smoothly fly the camera to a zoom area (position + target lerp over ~800ms).
+   * @param zoom       The zoom area config object.
+   * @param writeBack  When true (default), sync state back to zoom_entity so
+   *                   other HA components can read the current zoom area.
+   *                   Pass false when called from set hass to avoid an echo loop.
+   */
+  private _flyToZoom(zoom: any, writeBack = true): void {
     if (!zoom || !this._camera || !this._controls) return;
 
     if (zoom.level != null) {
       this._setVisibleLevel(zoom.level);
+    }
+
+    // Sync zoom_entity so automations / other cards can read the current zoom.
+    if (writeBack && this._config?.zoom_entity && this._hass && zoom.name) {
+      const currentState = this._hass.states[this._config.zoom_entity]?.state;
+      if (currentState !== zoom.name) {
+        this._lastZoomEntityState = zoom.name; // prevent echo on the next hass update
+        this._hass.callService('input_select', 'select_option', {
+          entity_id: this._config.zoom_entity,
+          option: zoom.name,
+        });
+      }
     }
 
     const startPos = this._camera.position.clone();
@@ -3605,10 +3663,14 @@ export class Floor3dCard extends LitElement {
         85%  { opacity: 1; transform: translateY(-48px) rotate(8deg) scale(1.05); }
         100% { opacity: 0; transform: translateY(-62px) rotate(14deg) scale(0.9); }
       }
-      @keyframes f3d-air-up    { 0%{opacity:0;transform:translateY(12px) scale(0.5)}  25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateY(-48px) scale(1.1)} }
-      @keyframes f3d-air-down  { 0%{opacity:0;transform:translateY(-12px) scale(0.5)} 25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateY(48px) scale(1.1)} }
-      @keyframes f3d-air-left  { 0%{opacity:0;transform:translateX(12px) scale(0.5)}  25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateX(-48px) scale(1.1)} }
-      @keyframes f3d-air-right { 0%{opacity:0;transform:translateX(-12px) scale(0.5)} 25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateX(48px) scale(1.1)} }
+      @keyframes f3d-air-up         { 0%{opacity:0;transform:translateY(12px) scale(0.5)}              25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateY(-48px) scale(1.1)} }
+      @keyframes f3d-air-down       { 0%{opacity:0;transform:translateY(-12px) scale(0.5)}             25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateY(48px) scale(1.1)} }
+      @keyframes f3d-air-left       { 0%{opacity:0;transform:translateX(12px) scale(0.5)}              25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateX(-48px) scale(1.1)} }
+      @keyframes f3d-air-right      { 0%{opacity:0;transform:translateX(-12px) scale(0.5)}             25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateX(48px) scale(1.1)} }
+      @keyframes f3d-air-up-left    { 0%{opacity:0;transform:translate(8px,8px) scale(0.5)}            25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(-34px,-34px) scale(1.1)} }
+      @keyframes f3d-air-up-right   { 0%{opacity:0;transform:translate(-8px,8px) scale(0.5)}           25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(34px,-34px) scale(1.1)} }
+      @keyframes f3d-air-down-left  { 0%{opacity:0;transform:translate(8px,-8px) scale(0.5)}           25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(-34px,34px) scale(1.1)} }
+      @keyframes f3d-air-down-right { 0%{opacity:0;transform:translate(-8px,-8px) scale(0.5)}          25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(34px,34px) scale(1.1)} }
     `;
     this._markerOverlay.appendChild(style);
 
@@ -3782,42 +3844,63 @@ export class Floor3dCard extends LitElement {
     } else if (anim.type === 'ac_flow') {
       const dir = anim.direction || 'up';
       const keyframe = `f3d-air-${dir}`;
+      const isDiag = dir.includes('-');
       const isHoriz = dir === 'left' || dir === 'right';
       // Store colors in dataset for live updates
       container.dataset.acCool = anim.color_cool || 'rgba(100,200,255,0.85)';
       container.dataset.acHeat = anim.color_heat || 'rgba(255,130,50,0.85)';
       container.dataset.acFan  = anim.color_fan  || 'rgba(240,240,240,0.7)';
-      // Half-ellipse arc shapes (∩ ∪ ) ( depending on direction) — the classic AC ripple look.
-      // Each arc is a half-ellipse whose dome faces the flow direction.
-      const arcDefs = isHoriz
-        ? [{ w: 10, h: 18 }, { w: 14, h: 26 }, { w: 18, h: 34 }]  // portrait for left/right
-        : [{ w: 18, h: 10 }, { w: 26, h: 14 }, { w: 34, h: 18 }]; // landscape for up/down
-      // Which border side to hide + which border-radius preset creates the half-ellipse dome
-      const hideBorderProp = { up: 'borderBottom', down: 'borderTop', left: 'borderRight', right: 'borderLeft' }[dir];
-      const borderRadius  = {
-        up:    '50% 50% 0 0 / 100% 100% 0 0',
-        down:  '0 0 50% 50% / 0 0 100% 100%',
-        left:  '50% 0 0 50% / 100% 0 0 100%',
-        right: '0 50% 50% 0 / 0 100% 100% 0',
-      }[dir];
-      // Center offset so arcs are stacked concentrically on the anchor
-      arcDefs.forEach(({ w, h }, i) => {
-        const arc = document.createElement('div');
-        arc.className = 'f3d-wind-arc';
-        arc.dataset.hideBorderProp = hideBorderProp;
-        arc.style.cssText = [
-          'position:absolute',
-          `width:${w}px`, `height:${h}px`,
-          `border:2px solid ${container.dataset.acCool}`,
-          `border-radius:${borderRadius}`,
-          `${hideBorderProp === 'borderBottom' ? 'border-bottom' :
-            hideBorderProp === 'borderTop'    ? 'border-top'    :
-            hideBorderProp === 'borderLeft'   ? 'border-left'   : 'border-right'}:none`,
-          `animation:${keyframe} 1.6s ease-out ${(i * 0.55).toFixed(2)}s infinite`,
-          `left:${-w / 2}px`, `top:${-h / 2}px`,
-        ].join(';');
-        container.appendChild(arc);
-      });
+
+      if (isDiag) {
+        // Diagonal directions: use concentric circles (no hidden border side).
+        // Three expanding rings that drift at 45° give a clean "diagonal breeze" look.
+        const arcDefs = [{ r: 6 }, { r: 9 }, { r: 13 }];
+        arcDefs.forEach(({ r }, i) => {
+          const arc = document.createElement('div');
+          arc.className = 'f3d-wind-arc';
+          arc.dataset.hideBorderProp = ''; // no hidden side for circles
+          arc.style.cssText = [
+            'position:absolute',
+            `width:${r * 2}px`, `height:${r * 2}px`,
+            `border:2px solid ${container.dataset.acCool}`,
+            'border-radius:50%',
+            `animation:${keyframe} 1.6s ease-out ${(i * 0.55).toFixed(2)}s infinite`,
+            `left:${-r}px`, `top:${-r}px`,
+          ].join(';');
+          container.appendChild(arc);
+        });
+      } else {
+        // Axial directions: half-ellipse arc shapes (∩ ∪ ) ( — the classic AC ripple look.
+        // Each arc is a half-ellipse whose dome faces the flow direction.
+        const arcDefs = isHoriz
+          ? [{ w: 10, h: 18 }, { w: 14, h: 26 }, { w: 18, h: 34 }]  // portrait for left/right
+          : [{ w: 18, h: 10 }, { w: 26, h: 14 }, { w: 34, h: 18 }]; // landscape for up/down
+        // Which border side to hide + which border-radius preset creates the half-ellipse dome
+        const hideBorderProp = { up: 'borderBottom', down: 'borderTop', left: 'borderRight', right: 'borderLeft' }[dir];
+        const borderRadius  = {
+          up:    '50% 50% 0 0 / 100% 100% 0 0',
+          down:  '0 0 50% 50% / 0 0 100% 100%',
+          left:  '50% 0 0 50% / 100% 0 0 100%',
+          right: '0 50% 50% 0 / 0 100% 100% 0',
+        }[dir];
+        arcDefs.forEach(({ w, h }, i) => {
+          const arc = document.createElement('div');
+          arc.className = 'f3d-wind-arc';
+          arc.dataset.hideBorderProp = hideBorderProp;
+          arc.style.cssText = [
+            'position:absolute',
+            `width:${w}px`, `height:${h}px`,
+            `border:2px solid ${container.dataset.acCool}`,
+            `border-radius:${borderRadius}`,
+            `${hideBorderProp === 'borderBottom' ? 'border-bottom' :
+              hideBorderProp === 'borderTop'    ? 'border-top'    :
+              hideBorderProp === 'borderLeft'   ? 'border-left'   : 'border-right'}:none`,
+            `animation:${keyframe} 1.6s ease-out ${(i * 0.55).toFixed(2)}s infinite`,
+            `left:${-w / 2}px`, `top:${-h / 2}px`,
+          ].join(';');
+          container.appendChild(arc);
+        });
+      }
     }
 
     return container;
