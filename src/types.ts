@@ -128,7 +128,7 @@ export interface AnimationConfig {
   active_state?: string;            // entity state that triggers animation (default: 'playing')
   color?: string;                   // note color (default: golden)
   // ac_flow
-  direction?: 'up' | 'down' | 'left' | 'right'; // airflow direction (default: 'up')
+  direction?: 'up' | 'down' | 'left' | 'right' | 'up-left' | 'up-right' | 'down-left' | 'down-right'; // airflow direction (default: 'up')
   color_cool?: string;              // particle color for cooling mode
   color_heat?: string;              // particle color for heating mode
   color_fan?: string;               // particle color for fan-only mode
@@ -248,6 +248,13 @@ export interface Floor3dCardConfig {
 
   // --- New: Zoom control ---
   hide_zoom_areas_ui?: string; // 'yes' hides the built-in zoom selector in the bottom-left
+
+  // --- New: Zoom entity ---
+  // Set to an input_select (or any HA entity whose state is the zoom area name).
+  // floor3d-card watches this entity and flies the camera to the matching zoom area
+  // whenever the state changes.  When the user clicks a zoom button in the card the
+  // entity is also updated, so automations / other cards can read the current zoom.
+  zoom_entity?: string;
 }
 
 export interface EntityFloor3dCardConfig {
