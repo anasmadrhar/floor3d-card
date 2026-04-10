@@ -656,6 +656,15 @@ export class Floor3dCard extends LitElement {
           this._object_ids = newObjectIds;
           this._hass = newHass;
 
+          // Capture old element's event-listener closures before nulling refs.
+          // _changeListener, _mousedownEventListener, etc. are in CACHE_SKIP so
+          // this (new) element already has its own fresh closures.  We need the
+          // OLD closures so we can remove them from _controls and _content.
+          const oldChangeListener = oldCard._changeListener;
+          const oldMousedownListener = oldCard._mousedownEventListener;
+          const oldMouseupListener = oldCard._mouseupEventListener;
+          const oldPerformListener = oldCard._performActionListener;
+
           // CRITICAL: Null out the old element's shared references immediately after
           // the property transfer.  The old renderer canvas still has webglcontextlost /
           // webglcontextrestored listeners whose closures capture `this` === oldCard.
@@ -684,6 +693,30 @@ export class Floor3dCard extends LitElement {
             console.log('floor3d-card: WebGL context restored after DOM move, reloading');
             this.display3dmodel();
           }, { once: true });
+
+          // Rebind OrbitControls change listener from old element to new element.
+          // The transferred _controls still has oldCard._changeListener which calls
+          // oldCard._render() — after we nulled oldCard._renderer that would crash
+          // whenever controls.update() fires a 'change' event (e.g. from set hass
+          // zoom-entity code).
+          if (this._controls) {
+            this._controls.removeEventListener('change', oldChangeListener);
+            this._controls.addEventListener('change', this._changeListener);
+          }
+
+          // Rebind _content interaction listeners from old element to new element.
+          if (this._content) {
+            this._content.removeEventListener('mousedown', oldMousedownListener);
+            this._content.removeEventListener('mouseup', oldMouseupListener);
+            this._content.removeEventListener('dblclick', oldPerformListener);
+            this._content.removeEventListener('touchstart', oldPerformListener);
+            this._content.removeEventListener('keydown', oldPerformListener);
+            this._content.addEventListener('mousedown', this._mousedownEventListener);
+            this._content.addEventListener('mouseup', this._mouseupEventListener);
+            this._content.addEventListener('dblclick', this._performActionListener);
+            this._content.addEventListener('touchstart', this._performActionListener);
+            this._content.addEventListener('keydown', this._performActionListener);
+          }
 
           if (!this._ispanel()) {
             const show_header = this._config.header ? this._config.header : 'yes';
@@ -775,6 +808,7 @@ export class Floor3dCard extends LitElement {
 
   private _render(): void {
     //render the model
+    if (!this._renderer) return;
     if (this._torch) {
       this._torch.position.copy(this._camera.position);
       this._torch.rotation.copy(this._camera.rotation);
@@ -1045,6 +1079,7 @@ export class Floor3dCard extends LitElement {
 
   private _resizeCanvas(): void {
     console.log('Resize canvas start');
+    if (!this._renderer?.domElement?.parentElement) return;
     if (
       this._renderer.domElement.parentElement.clientWidth !== this._renderer.domElement.width ||
       this._renderer.domElement.parentElement.clientHeight !== this._renderer.domElement.height
