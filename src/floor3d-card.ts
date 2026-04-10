@@ -656,9 +656,34 @@ export class Floor3dCard extends LitElement {
           this._object_ids = newObjectIds;
           this._hass = newHass;
 
+          // CRITICAL: Null out the old element's shared references immediately after
+          // the property transfer.  The old renderer canvas still has webglcontextlost /
+          // webglcontextrestored listeners whose closures capture `this` === oldCard.
+          // If the WebGL context is lost because the canvas moved between DOM containers,
+          // those stale listeners would call oldCard.display3dmodel() — which still has
+          // a valid reference to _content (now owned by this element) — and would corrupt
+          // our display by clearing _content and re-appending a different canvas.
+          // Nulling these refs makes the old listeners harmless no-ops.
+          oldCard._content = null;
+          oldCard._renderer = null;
+          oldCard._scene = null;
+          oldCard._modelready = false;
+
           // Re-attach content to new ha-card.
           this._card = this.shadowRoot.getElementById(this._card_id);
           this._card.appendChild(this._content);
+
+          // Register fresh context-loss handlers bound to THIS (new) element.
+          // The canvas already has old-element listeners but they are now harmless.
+          this._renderer.domElement.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            if (this._to_animate) this._renderer?.setAnimationLoop(null);
+            this._modelready = false;
+          }, { once: true });
+          this._renderer.domElement.addEventListener('webglcontextrestored', () => {
+            console.log('floor3d-card: WebGL context restored after DOM move, reloading');
+            this.display3dmodel();
+          }, { once: true });
 
           if (!this._ispanel()) {
             const show_header = this._config.header ? this._config.header : 'yes';
@@ -689,11 +714,11 @@ export class Floor3dCard extends LitElement {
 
           console.log('floor3d-card: cache restore complete');
 
-          // Deferred safety net: the WebGL context loss from moving the canvas
-          // between DOM containers is asynchronous — it may not be detectable
-          // in the same call stack as firstUpdated.  On the next animation
-          // frame (after browser layout + compositor), verify the context and
-          // either re-render (static card) or reload the model (context lost).
+          // Deferred safety net: moving the canvas between DOM containers can cause
+          // async WebGL context loss that isn't detectable synchronously.  Wait one
+          // animation frame (after browser layout + GPU compositor) then verify:
+          //   • context still alive → resize to final dimensions and re-render
+          //   • context lost        → full model reload (display3dmodel)
           requestAnimationFrame(() => {
             if (!this.isConnected) return; // element was already replaced
             const gl2 = this._renderer?.getContext?.();
@@ -702,9 +727,14 @@ export class Floor3dCard extends LitElement {
               this._renderer = null;
               this._modelready = false;
               this.display3dmodel();
-            } else if (!this._to_animate) {
-              // Re-render once more after layout pass so dimensions are final
-              this._render();
+            } else {
+              // Always resize before rendering: the synchronous _resizeCanvas() call
+              // above may have seen clientWidth=0 (layout not yet computed), leaving
+              // the canvas at 0×0.  By the time this rAF fires layout is guaranteed.
+              this._resizeCanvas();
+              if (!this._to_animate) {
+                this._render();
+              }
             }
           });
 
