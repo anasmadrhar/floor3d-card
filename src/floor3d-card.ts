@@ -3745,14 +3745,12 @@ export class Floor3dCard extends LitElement {
         85%  { opacity: 1; transform: translateY(-48px) rotate(8deg) scale(1.05); }
         100% { opacity: 0; transform: translateY(-62px) rotate(14deg) scale(0.9); }
       }
-      @keyframes f3d-air-up         { 0%{opacity:0;transform:translateY(12px) scale(0.5)}              25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateY(-48px) scale(1.1)} }
-      @keyframes f3d-air-down       { 0%{opacity:0;transform:translateY(-12px) scale(0.5)}             25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateY(48px) scale(1.1)} }
-      @keyframes f3d-air-left       { 0%{opacity:0;transform:translateX(12px) scale(0.5)}              25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateX(-48px) scale(1.1)} }
-      @keyframes f3d-air-right      { 0%{opacity:0;transform:translateX(-12px) scale(0.5)}             25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translateX(48px) scale(1.1)} }
-      @keyframes f3d-air-up-left    { 0%{opacity:0;transform:translate(8px,8px) scale(0.5)}            25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(-34px,-34px) scale(1.1)} }
-      @keyframes f3d-air-up-right   { 0%{opacity:0;transform:translate(-8px,8px) scale(0.5)}           25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(34px,-34px) scale(1.1)} }
-      @keyframes f3d-air-down-left  { 0%{opacity:0;transform:translate(8px,-8px) scale(0.5)}           25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(-34px,34px) scale(1.1)} }
-      @keyframes f3d-air-down-right { 0%{opacity:0;transform:translate(-8px,-8px) scale(0.5)}          25%{opacity:0.85} 75%{opacity:0.8} 100%{opacity:0;transform:translate(34px,34px) scale(1.1)} }
+      @keyframes f3d-flake-float {
+        0%   { opacity: 0; transform: translateY(0)    rotate(0deg)   scale(0.8); }
+        15%  { opacity: 1; }
+        85%  { opacity: 1; transform: translateY(-44px) rotate(120deg) scale(1.05); }
+        100% { opacity: 0; transform: translateY(-58px) rotate(180deg) scale(0.9); }
+      }
     `;
     this._markerOverlay.appendChild(style);
 
@@ -3924,65 +3922,27 @@ export class Floor3dCard extends LitElement {
       });
 
     } else if (anim.type === 'ac_flow') {
-      const dir = anim.direction || 'up';
-      const keyframe = `f3d-air-${dir}`;
-      const isDiag = dir.includes('-');
-      const isHoriz = dir === 'left' || dir === 'right';
-      // Store colors in dataset for live updates
-      container.dataset.acCool = anim.color_cool || 'rgba(100,200,255,0.85)';
-      container.dataset.acHeat = anim.color_heat || 'rgba(255,130,50,0.85)';
-      container.dataset.acFan  = anim.color_fan  || 'rgba(240,240,240,0.7)';
+      // Store colors in dataset so they can be updated live without recreating the element.
+      container.dataset.acCool = anim.color_cool || '#4fc3f7';
+      container.dataset.acHeat = anim.color_heat || '#ff7043';
+      container.dataset.acFan  = anim.color_fan  || 'rgba(210,210,210,0.85)';
 
-      if (isDiag) {
-        // Diagonal directions: use concentric circles (no hidden border side).
-        // Three expanding rings that drift at 45° give a clean "diagonal breeze" look.
-        const arcDefs = [{ r: 6 }, { r: 9 }, { r: 13 }];
-        arcDefs.forEach(({ r }, i) => {
-          const arc = document.createElement('div');
-          arc.className = 'f3d-wind-arc';
-          arc.dataset.hideBorderProp = ''; // no hidden side for circles
-          arc.style.cssText = [
-            'position:absolute',
-            `width:${r * 2}px`, `height:${r * 2}px`,
-            `border:2px solid ${container.dataset.acCool}`,
-            'border-radius:50%',
-            `animation:${keyframe} 1.6s ease-out ${(i * 0.55).toFixed(2)}s infinite`,
-            `left:${-r}px`, `top:${-r}px`,
-          ].join(';');
-          container.appendChild(arc);
-        });
-      } else {
-        // Axial directions: half-ellipse arc shapes (∩ ∪ ) ( — the classic AC ripple look.
-        // Each arc is a half-ellipse whose dome faces the flow direction.
-        const arcDefs = isHoriz
-          ? [{ w: 10, h: 18 }, { w: 14, h: 26 }, { w: 18, h: 34 }]  // portrait for left/right
-          : [{ w: 18, h: 10 }, { w: 26, h: 14 }, { w: 34, h: 18 }]; // landscape for up/down
-        // Which border side to hide + which border-radius preset creates the half-ellipse dome
-        const hideBorderProp = { up: 'borderBottom', down: 'borderTop', left: 'borderRight', right: 'borderLeft' }[dir];
-        const borderRadius  = {
-          up:    '50% 50% 0 0 / 100% 100% 0 0',
-          down:  '0 0 50% 50% / 0 0 100% 100%',
-          left:  '50% 0 0 50% / 100% 0 0 100%',
-          right: '0 50% 50% 0 / 0 100% 100% 0',
-        }[dir];
-        arcDefs.forEach(({ w, h }, i) => {
-          const arc = document.createElement('div');
-          arc.className = 'f3d-wind-arc';
-          arc.dataset.hideBorderProp = hideBorderProp;
-          arc.style.cssText = [
-            'position:absolute',
-            `width:${w}px`, `height:${h}px`,
-            `border:2px solid ${container.dataset.acCool}`,
-            `border-radius:${borderRadius}`,
-            `${hideBorderProp === 'borderBottom' ? 'border-bottom' :
-              hideBorderProp === 'borderTop'    ? 'border-top'    :
-              hideBorderProp === 'borderLeft'   ? 'border-left'   : 'border-right'}:none`,
-            `animation:${keyframe} 1.6s ease-out ${(i * 0.55).toFixed(2)}s infinite`,
-            `left:${-w / 2}px`, `top:${-h / 2}px`,
-          ].join(';');
-          container.appendChild(arc);
-        });
-      }
+      // Three snowflake icons with staggered horizontal positions and animation delays,
+      // mirroring the music_notes layout.  Color is updated live in _updateMarkersAndControls.
+      ([[-11, 0], [2, 0.6], [15, 1.2]] as [number, number][]).forEach(([xOff, delay]) => {
+        const icon = document.createElement('ha-icon');
+        (icon as any).icon = 'mdi:snowflake';
+        icon.className = 'f3d-flake-icon';
+        icon.style.cssText = [
+          'position:absolute',
+          'width:18px', 'height:18px',
+          `color:${container.dataset.acCool}`,
+          `animation:f3d-flake-float 2.0s ease-in-out ${delay}s infinite`,
+          `left:${xOff}px`,
+          'top:0',
+        ].join(';');
+        container.appendChild(icon);
+      });
     }
 
     return container;
@@ -4256,20 +4216,17 @@ export class Floor3dCard extends LitElement {
             el.style.display = 'none';
           } else {
             el.style.display = 'block';
-            // Update particle color based on hvac_mode / hvac_action
+            // Pick snowflake color based on hvac_mode / hvac_action
             let color: string;
             if (hvacMode === 'heat' || hvacAction === 'heating') {
-              color = el.dataset.acHeat || 'rgba(255,130,50,0.85)';
+              color = el.dataset.acHeat || '#ff7043';
             } else if (hvacMode === 'fan_only' || hvacAction === 'fan') {
-              color = el.dataset.acFan  || 'rgba(240,240,240,0.7)';
+              color = el.dataset.acFan  || 'rgba(210,210,210,0.85)';
             } else {
-              color = el.dataset.acCool || 'rgba(100,200,255,0.85)';
+              color = el.dataset.acCool || '#4fc3f7';
             }
-            el.querySelectorAll<HTMLElement>('.f3d-wind-arc').forEach(arc => {
-              arc.style.borderColor = color;
-              // Re-apply the hidden side (border-color override resets it)
-              const side = arc.dataset.hideBorderProp;
-              if (side) (arc.style as any)[side] = 'none';
+            el.querySelectorAll<HTMLElement>('.f3d-flake-icon').forEach(icon => {
+              icon.style.color = color;
             });
           }
         }
