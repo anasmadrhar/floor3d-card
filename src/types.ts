@@ -127,11 +127,10 @@ export interface AnimationConfig {
   // music_notes
   active_state?: string;            // entity state that triggers animation (default: 'playing')
   color?: string;                   // note color (default: golden)
-  // ac_flow
-  direction?: 'up' | 'down' | 'left' | 'right' | 'up-left' | 'up-right' | 'down-left' | 'down-right'; // airflow direction (default: 'up')
-  color_cool?: string;              // particle color for cooling mode
-  color_heat?: string;              // particle color for heating mode
-  color_fan?: string;               // particle color for fan-only mode
+  // ac_flow — snowflake icon, colored by HVAC mode
+  color_cool?: string;              // icon color when cooling (default: sky blue)
+  color_heat?: string;              // icon color when heating (default: orange)
+  color_fan?: string;               // icon color when fan-only (default: light gray)
 }
 
 // ---------------------------------------------------------------------------
