@@ -683,14 +683,31 @@ export class Floor3dCard extends LitElement {
           if (this._hass && this._markerOverlay) {
             this._updateMarkersAndControls(this._hass);
           }
-          // Always paint the canvas after restore — _updateMarkersAndControls
-          // only updates overlay positions; it does NOT repaint the WebGL scene.
-          // Without this, the preview stays black after every config change.
           if (!this._to_animate) {
             this._render();
           }
 
           console.log('floor3d-card: cache restore complete');
+
+          // Deferred safety net: the WebGL context loss from moving the canvas
+          // between DOM containers is asynchronous — it may not be detectable
+          // in the same call stack as firstUpdated.  On the next animation
+          // frame (after browser layout + compositor), verify the context and
+          // either re-render (static card) or reload the model (context lost).
+          requestAnimationFrame(() => {
+            if (!this.isConnected) return; // element was already replaced
+            const gl2 = this._renderer?.getContext?.();
+            if (!gl2 || gl2.isContextLost()) {
+              console.log('floor3d-card: WebGL context lost after DOM move — reloading model');
+              this._renderer = null;
+              this._modelready = false;
+              this.display3dmodel();
+            } else if (!this._to_animate) {
+              // Re-render once more after layout pass so dimensions are final
+              this._render();
+            }
+          });
+
           return;
         }
       }
