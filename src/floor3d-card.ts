@@ -4008,10 +4008,10 @@ export class Floor3dCard extends LitElement {
 
     // Reference distance for perspective scaling.  At this camera-to-anchor
     // distance the marker/control renders at its configured size (scale = 1.0).
-    // Farther away → smaller; closer → capped at 1.0.  Using 20 % of the scene
-    // bounding-box diagonal means the element is full-size when the camera is
-    // viewing roughly one room rather than the whole floor plan.
-    const refDist = (this._modelBboxDiagonal || 300) * 0.2;
+    // Farther away → smaller (min 0.3); closer → capped at 1.0.
+    // 0.5× the scene bounding-box diagonal puts full-size at roughly "one-room"
+    // zoom distance, shrinking to ~30% when the whole floor plan is in view.
+    const refDist = (this._modelBboxDiagonal || 300) * 0.5;
 
     // Compute a perspective scale factor for a given world-space anchor position.
     const perspScale = (worldPos: THREE.Vector3): number => {
