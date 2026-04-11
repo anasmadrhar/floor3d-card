@@ -91,6 +91,7 @@ export class Floor3dCard extends LitElement {
   private _modelZ?: number;
   private _to_animate: boolean;
   private _bboxmodel: THREE.Object3D;
+  private _modelBboxDiagonal = 0; // stored in _setCamera for overlay perspective scaling
   private _levels: THREE.Object3D[];
   private _displaylevels: boolean[];
   private _zoom: any[];
@@ -2298,6 +2299,11 @@ export class Floor3dCard extends LitElement {
     this._modelY = this._bboxmodel.position.y = -box.min.y;
     this._modelZ = this._bboxmodel.position.z = -(box.max.z - box.min.z) / 2;
 
+    // Store the bounding-box diagonal so _updateOverlayPositions can scale
+    // markers / controls proportionally to camera distance.
+    const bsize = box.getSize(new THREE.Vector3());
+    this._modelBboxDiagonal = bsize.length() || 300;
+
     if (this._config.camera_position) {
       this._camera.position.set(
         this._config.camera_position.x,
@@ -4000,13 +4006,27 @@ export class Floor3dCard extends LitElement {
 
     const GAP = 8; // px gap between stacked items sharing the same anchor
 
+    // Reference distance for perspective scaling.  At this camera-to-anchor
+    // distance the marker/control renders at its configured size (scale = 1.0).
+    // Farther away → smaller; closer → capped at 1.0.  Using 20 % of the scene
+    // bounding-box diagonal means the element is full-size when the camera is
+    // viewing roughly one room rather than the whole floor plan.
+    const refDist = (this._modelBboxDiagonal || 300) * 0.2;
+
+    // Compute a perspective scale factor for a given world-space anchor position.
+    const perspScale = (worldPos: THREE.Vector3): number => {
+      const dist = this._camera.position.distanceTo(worldPos);
+      return Math.max(0.3, Math.min(1.0, refDist / dist));
+    };
+
     // Collect all visible items, grouped by anchor ID so we can auto-stack them
     type OverlayItem = {
       el: HTMLElement;
       baseX: number;
       baseY: number;
       behind: boolean;
-      size: number;
+      size: number;    // configured CSS size in px
+      scale: number;   // perspective scale (0.3 – 1.0)
       offsetX: number;
       offsetY: number;
     };
@@ -4026,6 +4046,7 @@ export class Floor3dCard extends LitElement {
         groups.get(anchorId)!.push({
           el, baseX: x, baseY: y, behind,
           size: marker.size || 48,
+          scale: perspScale(worldPos),
           offsetX: marker.offset_x || 0,
           offsetY: marker.offset_y || 0,
         });
@@ -4046,6 +4067,7 @@ export class Floor3dCard extends LitElement {
         groups.get(anchorId)!.push({
           el, baseX: x, baseY: y, behind,
           size: control.size || 40,
+          scale: perspScale(worldPos),
           offsetX: control.offset_x || 0,
           offsetY: control.offset_y || 0,
         });
@@ -4065,25 +4087,31 @@ export class Floor3dCard extends LitElement {
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push({
           el, baseX: x, baseY: y, behind,
-          size: 0, offsetX: anim.offset_x || 0, offsetY: anim.offset_y || 0,
+          size: 0, scale: perspScale(worldPos),
+          offsetX: anim.offset_x || 0, offsetY: anim.offset_y || 0,
         });
       }
     }
 
     // Apply positions. When multiple items share an anchor, spread them
-    // horizontally as a centered chip row; manual offset_x/y applied on top.
+    // horizontally as a centered chip row using their visual (scaled) size so
+    // the spacing stays proportional to their on-screen footprint.
+    // Manual offset_x/y is applied on top.
     for (const group of groups.values()) {
-      const totalWidth = group.reduce((sum, item) => sum + item.size, 0) + GAP * (group.length - 1);
+      const totalWidth = group.reduce((sum, item) => sum + item.size * item.scale, 0)
+                         + GAP * (group.length - 1);
       let cursor = -totalWidth / 2;
       for (const item of group) {
-        const stackX = cursor + item.size / 2;
-        cursor += item.size + GAP;
+        const vs = item.size * item.scale; // visual size after scaling
+        const stackX = cursor + vs / 2;
+        cursor += vs + GAP;
         if (item.behind) {
           item.el.style.opacity = '0';
         } else {
           item.el.style.opacity = '1';
           item.el.style.left = `${item.baseX + stackX + item.offsetX}px`;
-          item.el.style.top = `${item.baseY + item.offsetY}px`;
+          item.el.style.top  = `${item.baseY + item.offsetY}px`;
+          item.el.style.transform = `translate(-50%,-50%) scale(${item.scale.toFixed(3)})`;
         }
       }
     }
