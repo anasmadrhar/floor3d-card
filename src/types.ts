@@ -162,7 +162,7 @@ export interface Floor3dCardConfig {
   action: string;
   overlay: string;
   width: number;
-  height: number;
+  height: number | string; // px number (e.g. 400) or any CSS value (e.g. "100vh", "50%")
   overlay_bgcolor: string;
   overlay_fgcolor: string;
   overlay_alignment: string;

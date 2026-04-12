@@ -783,7 +783,10 @@ export class Floor3dCard extends LitElement {
         if (this._ispanel()) {
           this._content.style.height = 'calc(100vh - var(--header-height))';
         } else {
-          this._content.style.height = (this._config.height ? this._config.height + 'px' : '400px');
+          // height can be a bare number (→ px) or a full CSS value like "100vh", "50%", "calc(...)"
+          this._content.style.height = this._config.height
+            ? (typeof this._config.height === 'number' ? this._config.height + 'px' : String(this._config.height))
+            : '400px';
         }
         this._content.style.alignContent = 'center';
         this._card.appendChild(this._content);
