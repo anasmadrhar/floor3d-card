@@ -1609,12 +1609,22 @@ export class Floor3dCard extends LitElement {
     this._renderer.domElement.style.display = 'block';
 
     if (this._config.backgroundColor) {
-      if (this._config.backgroundColor == 'transparent') {
+      const bg = this._config.backgroundColor;
+      if (bg === 'transparent') {
         this._renderer.setClearColor(0x000000, 0);
+      } else if (/gradient|url\s*\(/i.test(bg)) {
+        // CSS background value (gradient, image url, etc.).
+        // Make the WebGL canvas transparent so the value applied to _content
+        // shows through behind the 3D geometry.
+        this._renderer.setClearColor(0x000000, 0);
+        if (this._content) this._content.style.background = bg;
       } else {
-        this._scene.background = new THREE.Color(this._config.backgroundColor);
+        // Solid colour — hand off to THREE.js for integrated scene background.
+        if (this._content) this._content.style.background = '';
+        this._scene.background = new THREE.Color(bg);
       }
     } else {
+      if (this._content) this._content.style.background = '';
       this._scene.background = new THREE.Color('#aaaaaa');
     }
 
