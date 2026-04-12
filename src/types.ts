@@ -270,6 +270,11 @@ export interface Floor3dCardConfig {
   // When set, the ha-card background is automatically made transparent so the
   // blurred content behind the card is visible through the semi-transparent backgroundColor.
   backdrop_filter?: string;
+
+  // Ground plane style when sky:'yes'. 'none' removes the ground entirely,
+  // 'transparent' makes it invisible (keeps shadow reception), or any CSS color
+  // string (e.g. '#2d4a1e') paints it that color. Default: warm yellowish ground.
+  ground?: string;
 }
 
 export interface EntityFloor3dCardConfig {
