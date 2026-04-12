@@ -167,6 +167,21 @@ export class Floor3dCard extends LitElement {
   // --- Zoom entity state tracking ---
   private _lastZoomEntityState?: string;
 
+  // --- Dynamic sky / sun / moon / weather ---
+  private _sunDirection?: THREE.Vector3;    // normalized sun direction in world space
+  private _moonMesh?: THREE.Mesh;           // moon sphere in THREE.js scene
+  private _weatherSystem?: {               // active 3D weather particle system
+    mesh: THREE.Points | THREE.LineSegments;
+    velArray: Float32Array;                // [vx, vy, vz] per particle (Points) or per segment-pair (LineSegments)
+    spread: number;                        // half-width of spawn area (world units)
+    maxY: number;                          // Y ceiling for particle reset
+    type: 'rain' | 'snow' | 'hail' | 'sand' | 'wind';
+    segLen: number;                        // streak length (rain) or 0 for Points types
+  };
+  private _lightningLight?: THREE.PointLight;
+  private _lightningTimer = 0;
+  private _lightningPhase = 0;
+
   // --- Marker / room-control / animation overlay system ---
   private _markerOverlay?: HTMLDivElement;
   private _markerElements: Map<string, HTMLElement> = new Map();
@@ -1454,6 +1469,43 @@ export class Floor3dCard extends LitElement {
           if (this._markerOverlay) {
             this._updateMarkersAndControls(hass);
           }
+
+          // --- Dynamic sky live updates ---
+          if (this._config.sky === 'yes' && this._sky) {
+            const prevHass = this._hass;
+
+            // Sun position: update when azimuth or elevation changes
+            const sunState    = hass.states['sun.sun'];
+            const prevSunState = prevHass?.states['sun.sun'];
+            const azimuthChanged   = sunState?.attributes?.['azimuth']   !== prevSunState?.attributes?.['azimuth'];
+            const elevationChanged = sunState?.attributes?.['elevation'] !== prevSunState?.attributes?.['elevation'];
+            const dayNightChanged  = sunState?.state !== prevSunState?.state;
+            if (azimuthChanged || elevationChanged) {
+              this._updateSunPosition();
+            }
+            if (dayNightChanged || azimuthChanged || elevationChanged) {
+              this._updateMoonPosition();
+            }
+          }
+
+          // Weather entity: update sky + particles when state changes
+          if (this._config.weather_entity) {
+            const ws  = hass.states[this._config.weather_entity];
+            const pws = this._hass?.states[this._config.weather_entity];
+            if (ws?.state !== pws?.state) {
+              this._updateWeatherSky(ws.state);
+              this._createWeatherParticles(ws.state);
+            }
+          }
+
+          // Moon phase entity: rebuild moon texture when state changes
+          if (this._config.moon_entity) {
+            const ms  = hass.states[this._config.moon_entity];
+            const pms = this._hass?.states[this._config.moon_entity];
+            if (ms?.state !== pms?.state) {
+              this._updateMoonPhase();
+            }
+          }
         }
       }
     } catch (e) {
@@ -1500,77 +1552,394 @@ export class Floor3dCard extends LitElement {
     //this._bboxmodel.add(ground);
     this._scene.add(ground);
 
-    // inti sun
+    // init sun directional light
 
     console.log('Init Sun');
 
     this._sun = new THREE.DirectionalLight(0xffffff, 2.0);
-    const sun = new THREE.Vector3();
     this._scene.add(this._sun);
 
-    if (this._hass.states['sun.sun'].attributes['azimuth']) {
-      effectController.azimuth = Number(this._hass.states['sun.sun'].attributes['azimuth']);
-    }
-
-    if (this._hass.states['sun.sun'].attributes['elevation']) {
-      effectController.elevation = Number(this._hass.states['sun.sun'].attributes['elevation']);
-    }
-
-    let south: THREE.Vector3;
-
-    south = new THREE.Vector3();
-
-    if (this._config.north) {
-      south.x = -this._config.north.x;
-      south.z = -this._config.north.z;
-      south.y = 0;
-    } else {
-      south.x = 0;
-      south.z = 1;
-      south.y = 0;
-    }
-
-    let south_sphere: THREE.Spherical;
-
-    south_sphere = new THREE.Spherical();
-
-    south_sphere.setFromVector3(south);
-
-    south_sphere.phi = THREE.MathUtils.degToRad(90 - effectController.elevation);
-
-    south_sphere.theta = THREE.MathUtils.degToRad(
-      THREE.MathUtils.radToDeg(south_sphere.theta) - effectController.azimuth,
-    );
-
-    sun.setFromSphericalCoords(1, south_sphere.phi, south_sphere.theta);
-
-    if (sun.y < 0) {
-      this._sun.intensity = 0;
-    }
-
-    uniforms['sunPosition'].value.copy(sun);
-
-    this._sun.position.copy(sun.multiplyScalar(5000));
-
-    // sun directional light parameters
+    // shadow parameters
     const d = 1000;
-
-    this._sun.shadow.camera;
     this._sun.castShadow = true;
-
     this._sun.shadow.mapSize.width = 1024;
     this._sun.shadow.mapSize.height = 1024;
     this._sun.shadow.camera.near = 4000;
     this._sun.shadow.camera.far = 6000;
-
     this._sun.shadow.camera.left = -d;
     this._sun.shadow.camera.right = d;
     this._sun.shadow.camera.top = d;
     this._sun.shadow.camera.bottom = -d;
 
-    this._renderer.shadowMap.needsUpdate = true;
+    // Position sun from current sun.sun entity state
+    this._updateSunPosition();
+
+    // Initialise moon mesh (3D sphere with phase texture)
+    this._initMoon();
 
     //FOR DEBUG: this._scene.add(new THREE.CameraHelper(this._sun.shadow.camera));
+  }
+
+  /** Reposition the sun (sky shader + directional light) from the current sun.sun entity. */
+  private _updateSunPosition(): void {
+    if (!this._sky || !this._sun || !this._hass?.states['sun.sun']) return;
+
+    const attrs = this._hass.states['sun.sun'].attributes;
+    const azimuth   = Number(attrs['azimuth']   ?? 180);
+    const elevation = Number(attrs['elevation']  ?? 15);
+
+    const south = new THREE.Vector3();
+    if (this._config.north) {
+      south.set(-this._config.north.x, 0, -this._config.north.z);
+    } else {
+      south.set(0, 0, 1);
+    }
+
+    const sphere = new THREE.Spherical();
+    sphere.setFromVector3(south);
+    sphere.phi   = THREE.MathUtils.degToRad(90 - elevation);
+    sphere.theta = THREE.MathUtils.degToRad(THREE.MathUtils.radToDeg(sphere.theta) - azimuth);
+
+    const sunDir = new THREE.Vector3().setFromSphericalCoords(1, sphere.phi, sphere.theta);
+
+    this._sun.intensity = sunDir.y < 0 ? 0 : 2.0;
+    this._sky.material.uniforms['sunPosition'].value.copy(sunDir);
+    this._sun.position.copy(sunDir.clone().multiplyScalar(5000));
+    this._renderer.shadowMap.needsUpdate = true;
+
+    // Normalized direction used for moon antipodal positioning
+    this._sunDirection = sunDir.normalize();
+  }
+
+  /** Update THREE.js sky shader uniforms + scene fog to match a HA weather state. */
+  private _updateWeatherSky(state: string): void {
+    if (!this._sky || !this._scene) return;
+    const u = this._sky.material.uniforms;
+
+    // [turbidity, rayleigh, fogDensity, fogColorHex]
+    const params: Record<string, [number, number, number, number]> = {
+      'sunny':           [10, 3, 0,        0xaaaaaa],
+      'clear-night':     [10, 3, 0,        0xaaaaaa],
+      'partlycloudy':    [13, 4, 0.00008,  0x999999],
+      'cloudy':          [20, 6, 0.00015,  0x888888],
+      'fog':             [28, 9, 0.0006,   0xbbbbbb],
+      'rainy':           [20, 5, 0.00012,  0x888888],
+      'lightning-rainy': [20, 5, 0.00012,  0x888888],
+      'pouring':         [24, 6, 0.0002,   0x777777],
+      'snowy':           [18, 5, 0.00012,  0xcccccc],
+      'snowy-rainy':     [20, 5, 0.00015,  0xaaaaaa],
+      'lightning':       [18, 5, 0.00012,  0x777777],
+      'hail':            [22, 6, 0.00015,  0x777777],
+      'windy':           [10, 3, 0,        0xaaaaaa],
+      'windy-variant':   [10, 3, 0,        0xaaaaaa],
+      'sandstorm':       [35, 7, 0.0008,   0xc8a070],
+      'dust':            [35, 7, 0.0008,   0xc8a070],
+      'exceptional':     [35, 7, 0.0008,   0xc8a070],
+    };
+
+    const [turbidity, rayleigh, fogDensity, fogColor] = params[state] ?? [10, 3, 0, 0xaaaaaa];
+    u['turbidity'].value = turbidity;
+    u['rayleigh'].value  = rayleigh;
+    this._scene.fog = fogDensity > 0 ? new THREE.FogExp2(fogColor, fogDensity) : null;
+  }
+
+  /** Compute current lunar phase as a 0–1 fraction (0=new, 0.5=full). */
+  private _computeMoonPhase(entityState?: string): number {
+    if (entityState) {
+      const stateMap: Record<string, number> = {
+        'new_moon': 0, 'waxing_crescent': 0.125, 'first_quarter': 0.25,
+        'waxing_gibbous': 0.375, 'full_moon': 0.5,
+        'waning_gibbous': 0.625, 'last_quarter': 0.75, 'waning_crescent': 0.875,
+      };
+      return stateMap[entityState] ?? 0.5;
+    }
+    const knownNew = new Date('2000-01-06T18:14:00Z').getTime();
+    const cycle = 29.53058770576 * 24 * 3600 * 1000;
+    return ((Date.now() - knownNew) % cycle + cycle) % cycle / cycle;
+  }
+
+  /** Build a canvas texture showing the correct lit/dark lunar phase pattern. */
+  private _buildMoonTexture(phase: number): THREE.CanvasTexture {
+    const S = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = S;
+    const ctx = canvas.getContext('2d')!;
+    const r = S / 2 - 2;
+    const cx = S / 2, cy = S / 2;
+
+    // Base: dark side
+    const darkGrad = ctx.createRadialGradient(cx - r * 0.15, cy - r * 0.15, 0, cx, cy, r);
+    darkGrad.addColorStop(0, '#2a2535');
+    darkGrad.addColorStop(1, '#0d0b14');
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = darkGrad;
+    ctx.fill();
+
+    // Lit side
+    const litGrad = ctx.createRadialGradient(cx - r * 0.1, cy - r * 0.2, 0, cx, cy, r);
+    litGrad.addColorStop(0, '#f0e8c8');
+    litGrad.addColorStop(0.6, '#d8ccaa');
+    litGrad.addColorStop(1, '#b8ad8a');
+
+    ctx.save();
+    ctx.beginPath();
+    if (phase <= 0.5) {
+      // Waxing: right half lit, terminator on left
+      ctx.arc(cx, cy, r, -Math.PI / 2, Math.PI / 2);
+      const ex = r * Math.cos(phase * Math.PI * 2);
+      ctx.ellipse(cx, cy, Math.abs(ex), r, 0, Math.PI / 2, -Math.PI / 2, ex >= 0);
+    } else {
+      // Waning: left half lit, terminator on right
+      ctx.arc(cx, cy, r, Math.PI / 2, -Math.PI / 2);
+      const ex = -r * Math.cos(phase * Math.PI * 2);
+      ctx.ellipse(cx, cy, Math.abs(ex), r, 0, -Math.PI / 2, Math.PI / 2, ex >= 0);
+    }
+    ctx.fillStyle = litGrad;
+    ctx.fill();
+    ctx.restore();
+
+    // Clip to circle
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  /** Initialise the 3D moon mesh and add it to the scene. Called from _initSky(). */
+  private _initMoon(): void {
+    if (this._config.show_moon === 'no') return;
+    const moonState = this._config.moon_entity
+      ? this._hass?.states[this._config.moon_entity]?.state : undefined;
+    const phase = this._computeMoonPhase(moonState);
+    const tex   = this._buildMoonTexture(phase);
+
+    const geo = new THREE.SphereGeometry(600, 32, 32);
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      emissiveMap: tex,
+      emissive: new THREE.Color(0xffffff),
+      emissiveIntensity: 0.85,
+      roughness: 1,
+      metalness: 0,
+    });
+    this._moonMesh = new THREE.Mesh(geo, mat);
+    this._moonMesh.name = '__f3d_moon';
+    this._moonMesh.visible = false;
+    this._scene.add(this._moonMesh);
+    this._updateMoonPosition();
+  }
+
+  /** Move moon mesh to antipodal sky position and show/hide based on day/night. */
+  private _updateMoonPosition(): void {
+    if (!this._moonMesh || !this._sunDirection) return;
+    const moonDir = this._sunDirection.clone().negate();
+    this._moonMesh.position.copy(moonDir.multiplyScalar(90000));
+    const isNight = this._hass?.states['sun.sun']?.state === 'below_horizon';
+    this._moonMesh.visible = isNight;
+  }
+
+  /** Rebuild the moon phase canvas texture when moon_entity state changes. */
+  private _updateMoonPhase(): void {
+    if (!this._moonMesh) return;
+    const moonState = this._config.moon_entity
+      ? this._hass?.states[this._config.moon_entity]?.state : undefined;
+    const phase = this._computeMoonPhase(moonState);
+    const tex   = this._buildMoonTexture(phase);
+    const mat   = this._moonMesh.material as THREE.MeshStandardMaterial;
+    mat.map?.dispose();
+    mat.emissiveMap?.dispose();
+    mat.map = tex;
+    mat.emissiveMap = tex;
+    mat.needsUpdate = true;
+  }
+
+  /** Create a soft disc canvas texture for Point particles (snow, hail, sand, wind). */
+  private _makeDiscSprite(color: string, size = 32): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  /** Remove active weather particles and lightning light from the scene. */
+  private _removeWeatherParticles(): void {
+    if (this._weatherSystem) {
+      this._scene?.remove(this._weatherSystem.mesh);
+      this._weatherSystem.mesh.geometry.dispose();
+      (this._weatherSystem.mesh.material as THREE.Material).dispose();
+      this._weatherSystem = undefined;
+    }
+    if (this._lightningLight) {
+      this._scene?.remove(this._lightningLight);
+      this._lightningLight = undefined;
+    }
+    this._lightningTimer = 0;
+    this._lightningPhase = 0;
+  }
+
+  /**
+   * Build a 3D particle/streak system for the given HA weather state and add to scene.
+   * Particles are animated each frame in _animationLoop().
+   */
+  private _createWeatherParticles(state: string): void {
+    this._removeWeatherParticles();
+    if (!this._scene || this._config.weather_precipitation === 'no') return;
+
+    const spread = Math.max(this._modelBboxDiagonal || 400, 400) * 1.5;
+    const maxY   = Math.max(this._modelBboxDiagonal || 200, 200) * 0.8;
+
+    // Rain / Pouring / Snowy-rainy: LineSegments (streak look)
+    if (state === 'rainy' || state === 'lightning-rainy' || state === 'pouring' || state === 'snowy-rainy') {
+      const count  = state === 'pouring' ? 1200 : state === 'snowy-rainy' ? 400 : 700;
+      const segLen = state === 'pouring' ? 14 : 9;
+      const col    = state === 'pouring' ? 0x8899cc : 0x99aadd;
+
+      const positions = new Float32Array(count * 6);
+      const velY      = new Float32Array(count);
+
+      for (let i = 0; i < count; i++) {
+        const x = (Math.random() - 0.5) * spread * 2;
+        const y = Math.random() * (maxY + segLen);
+        const z = (Math.random() - 0.5) * spread * 2;
+        const v = 90 + Math.random() * 60;
+        positions[i * 6]     = x;  positions[i * 6 + 1] = y + segLen;  positions[i * 6 + 2] = z;
+        positions[i * 6 + 3] = x;  positions[i * 6 + 4] = y;           positions[i * 6 + 5] = z;
+        velY[i] = v;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.LineBasicMaterial({
+        color: col, transparent: true, opacity: 0.45, depthWrite: false,
+      });
+      const mesh = new THREE.LineSegments(geo, mat);
+      mesh.name = '__f3d_weather';
+      this._scene.add(mesh);
+      this._weatherSystem = { mesh, velArray: velY, spread, maxY, type: 'rain', segLen };
+
+      if (state === 'lightning-rainy') {
+        this._lightningLight = new THREE.PointLight(0xc8d8ff, 0, spread * 0.8, spread * 2);
+        this._lightningLight.position.set(0, maxY * 0.9, 0);
+        this._scene.add(this._lightningLight);
+        this._lightningTimer = Math.random() * 5;
+      }
+      return;
+    }
+
+    // Lightning only
+    if (state === 'lightning') {
+      this._lightningLight = new THREE.PointLight(0xc8d8ff, 0, spread * 0.8, spread * 2);
+      this._lightningLight.position.set(0, maxY * 0.9, 0);
+      this._scene.add(this._lightningLight);
+      this._lightningTimer = Math.random() * 5;
+      return;
+    }
+
+    // Snow
+    if (state === 'snowy') {
+      const count = 600;
+      const tex   = this._makeDiscSprite('rgba(200,220,255,0.9)');
+      const positions  = new Float32Array(count * 3);
+      const velocities = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        positions[i*3]   = (Math.random() - 0.5) * spread * 2;
+        positions[i*3+1] = Math.random() * maxY;
+        positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
+        velocities[i*3]   = (Math.random() - 0.5) * 4;
+        velocities[i*3+1] = -(8 + Math.random() * 8);
+        velocities[i*3+2] = (Math.random() - 0.5) * 4;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({ map: tex, size: 3, transparent: true, opacity: 0.8, depthWrite: false, sizeAttenuation: true });
+      const mesh = new THREE.Points(geo, mat);
+      mesh.name = '__f3d_weather';
+      this._scene.add(mesh);
+      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'snow', segLen: 0 };
+      return;
+    }
+
+    // Hail
+    if (state === 'hail') {
+      const count = 350;
+      const tex   = this._makeDiscSprite('rgba(210,225,255,0.95)');
+      const positions  = new Float32Array(count * 3);
+      const velocities = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        positions[i*3]   = (Math.random() - 0.5) * spread * 2;
+        positions[i*3+1] = Math.random() * maxY;
+        positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
+        velocities[i*3]   = (Math.random() - 0.5) * 6;
+        velocities[i*3+1] = -(60 + Math.random() * 40);
+        velocities[i*3+2] = (Math.random() - 0.5) * 6;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({ map: tex, size: 4, transparent: true, opacity: 0.9, depthWrite: false, sizeAttenuation: true });
+      const mesh = new THREE.Points(geo, mat);
+      mesh.name = '__f3d_weather';
+      this._scene.add(mesh);
+      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'hail', segLen: 0 };
+      return;
+    }
+
+    // Sandstorm / dust
+    if (state === 'sandstorm' || state === 'dust' || state === 'exceptional') {
+      const count = 1200;
+      const tex   = this._makeDiscSprite('rgba(200,155,70,0.75)');
+      const positions  = new Float32Array(count * 3);
+      const velocities = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        positions[i*3]   = (Math.random() - 0.5) * spread * 2;
+        positions[i*3+1] = Math.random() * maxY;
+        positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
+        velocities[i*3]   = 60 + Math.random() * 50;
+        velocities[i*3+1] = (Math.random() - 0.5) * 8;
+        velocities[i*3+2] = (Math.random() - 0.5) * 15;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({ map: tex, size: 2.5, transparent: true, opacity: 0.65, depthWrite: false, sizeAttenuation: true });
+      const mesh = new THREE.Points(geo, mat);
+      mesh.name = '__f3d_weather';
+      this._scene.add(mesh);
+      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'sand', segLen: 0 };
+      return;
+    }
+
+    // Windy (debris)
+    if (state === 'windy' || state === 'windy-variant') {
+      const count = 250;
+      const tex   = this._makeDiscSprite('rgba(140,180,90,0.8)');
+      const positions  = new Float32Array(count * 3);
+      const velocities = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        positions[i*3]   = (Math.random() - 0.5) * spread * 2;
+        positions[i*3+1] = Math.random() * maxY * 0.6;
+        positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
+        velocities[i*3]   = 30 + Math.random() * 25;
+        velocities[i*3+1] = (Math.random() - 0.5) * 6;
+        velocities[i*3+2] = (Math.random() - 0.5) * 10;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({ map: tex, size: 5, transparent: true, opacity: 0.7, depthWrite: false, sizeAttenuation: true });
+      const mesh = new THREE.Points(geo, mat);
+      mesh.name = '__f3d_weather';
+      this._scene.add(mesh);
+      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'wind', segLen: 0 };
+    }
+    // Clear/cloudy/fog/partlycloudy: sky uniforms handle visuals; no particles needed.
   }
 
   private _initTorch(): void {
@@ -3616,6 +3985,91 @@ export class Floor3dCard extends LitElement {
 
     TWEEN.update();
 
+    // --- Weather particle animation ---
+    if (this._weatherSystem) {
+      const ws = this._weatherSystem;
+      const pos = ws.mesh.geometry.attributes['position'].array as Float32Array;
+      const dt = clockDelta;
+
+      if (ws.type === 'rain') {
+        // LineSegments: each pair of vertices (top, bottom) falls together
+        for (let i = 0; i < ws.velArray.length; i++) {
+          const dy = ws.velArray[i] * dt;
+          pos[i * 6 + 1] -= dy;
+          pos[i * 6 + 4] -= dy;
+          if (pos[i * 6 + 4] < 0) {
+            const x = (Math.random() - 0.5) * ws.spread * 2;
+            const z = (Math.random() - 0.5) * ws.spread * 2;
+            pos[i * 6]     = x; pos[i * 6 + 1] = ws.maxY + ws.segLen; pos[i * 6 + 2] = z;
+            pos[i * 6 + 3] = x; pos[i * 6 + 4] = ws.maxY;             pos[i * 6 + 5] = z;
+          }
+        }
+      } else if (ws.type === 'snow' || ws.type === 'hail') {
+        // Points: [vx, vy, vz] triplets
+        const n = ws.velArray.length / 3;
+        for (let i = 0; i < n; i++) {
+          pos[i*3]   += ws.velArray[i*3]   * dt;
+          pos[i*3+1] += ws.velArray[i*3+1] * dt;
+          pos[i*3+2] += ws.velArray[i*3+2] * dt;
+          if (pos[i*3+1] < 0) {
+            pos[i*3]   = (Math.random() - 0.5) * ws.spread * 2;
+            pos[i*3+1] = ws.maxY;
+            pos[i*3+2] = (Math.random() - 0.5) * ws.spread * 2;
+          }
+        }
+      } else if (ws.type === 'sand' || ws.type === 'wind') {
+        // Points: horizontal movement; wrap in X
+        const n = ws.velArray.length / 3;
+        for (let i = 0; i < n; i++) {
+          pos[i*3]   += ws.velArray[i*3]   * dt;
+          pos[i*3+1] += ws.velArray[i*3+1] * dt;
+          pos[i*3+2] += ws.velArray[i*3+2] * dt;
+          // Wrap in X when particle exits spread volume
+          if (pos[i*3] > ws.spread) {
+            pos[i*3] = -ws.spread + Math.random() * ws.spread * 0.2;
+            pos[i*3+1] = Math.random() * (ws.type === 'wind' ? ws.maxY * 0.6 : ws.maxY);
+            pos[i*3+2] = (Math.random() - 0.5) * ws.spread * 2;
+          }
+        }
+      }
+
+      ws.mesh.geometry.attributes['position'].needsUpdate = true;
+    }
+
+    // --- Lightning flash ---
+    if (this._lightningLight) {
+      this._lightningTimer -= clockDelta;
+      if (this._lightningTimer <= 0) {
+        if (this._lightningPhase === 0) {
+          // First flash
+          this._lightningLight.intensity = 3 + Math.random() * 2;
+          this._lightningTimer = 0.05 + Math.random() * 0.05;
+          this._lightningPhase = 1;
+        } else if (this._lightningPhase === 1) {
+          // Brief off
+          this._lightningLight.intensity = 0;
+          this._lightningTimer = 0.04 + Math.random() * 0.04;
+          this._lightningPhase = 2;
+        } else if (this._lightningPhase === 2) {
+          // Second flash (optional)
+          if (Math.random() > 0.4) {
+            this._lightningLight.intensity = 2 + Math.random() * 2;
+            this._lightningTimer = 0.05 + Math.random() * 0.04;
+            this._lightningPhase = 3;
+          } else {
+            this._lightningLight.intensity = 0;
+            this._lightningTimer = 4 + Math.random() * 6;
+            this._lightningPhase = 0;
+          }
+        } else {
+          // Cooldown
+          this._lightningLight.intensity = 0;
+          this._lightningTimer = 4 + Math.random() * 6;
+          this._lightningPhase = 0;
+        }
+      }
+    }
+
     this._renderer.shadowMap.needsUpdate = true;
     this._renderer.render(this._scene, this._camera);
     this._updateOverlayPositions();
@@ -3791,7 +4245,7 @@ export class Floor3dCard extends LitElement {
     this._roomControlElements.clear();
     this._animationElements.clear();
 
-    // Inject CSS keyframes for room animations
+    // Inject CSS keyframes for room animations (music notes, AC snowflakes)
     const style = document.createElement('style');
     style.textContent = `
       @keyframes f3d-note-float {
@@ -3808,6 +4262,15 @@ export class Floor3dCard extends LitElement {
       }
     `;
     this._markerOverlay.appendChild(style);
+
+    // Apply weather sky uniforms + spawn 3D particles if configured
+    if (this._config.weather_entity && this._hass) {
+      const ws = this._hass.states[this._config.weather_entity];
+      if (ws) {
+        this._updateWeatherSky(ws.state);
+        this._createWeatherParticles(ws.state);
+      }
+    }
 
     // Build marker elements
     if (this._config.markers) {
