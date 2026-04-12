@@ -254,6 +254,11 @@ export interface Floor3dCardConfig {
   // whenever the state changes.  When the user clicks a zoom button in the card the
   // entity is also updated, so automations / other cards can read the current zoom.
   zoom_entity?: string;
+
+  // CSS backdrop-filter applied to the 3D viewport, e.g. "blur(10px) saturate(180%)".
+  // When set, the ha-card background is automatically made transparent so the
+  // blurred content behind the card is visible through the semi-transparent backgroundColor.
+  backdrop_filter?: string;
 }
 
 export interface EntityFloor3dCardConfig {
