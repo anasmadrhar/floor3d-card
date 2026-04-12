@@ -275,6 +275,15 @@ export interface Floor3dCardConfig {
   // 'transparent' makes it invisible (keeps shadow reception), or any CSS color
   // string (e.g. '#2d4a1e') paints it that color. Default: warm yellowish ground.
   ground?: string;
+
+  // Distance of the sky dome from scene center (default 100000).
+  // Reduce for a "closer horizon" feel.
+  sky_distance?: number;
+
+  // Distance of the sun/moon 3D spheres from scene center (world units).
+  // Defaults to 1.5× the model's bounding-box diagonal if omitted.
+  sun_distance?: number;
+  moon_distance?: number;
 }
 
 export interface EntityFloor3dCardConfig {
