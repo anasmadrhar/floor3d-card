@@ -614,7 +614,8 @@ export class Floor3dCard extends LitElement {
   }
 
   getCardSize(): number {
-    const px = this._config?.height || 400;
+    const h = this._config?.height;
+    const px = typeof h === 'number' ? h : 400;
     return Math.ceil(px / 72);
   }
 
@@ -737,6 +738,9 @@ export class Floor3dCard extends LitElement {
             this._renderer.setAnimationLoop(() => this._animationLoop());
           }
 
+          // Re-apply background from the new config (may have changed since the cached scene was created).
+          this._applyBackground();
+
           // Recalibrate camera/renderer to the new container, then re-apply state.
           this._resizeCanvas();
           if (this._hass && this._markerOverlay) {
@@ -807,6 +811,29 @@ export class Floor3dCard extends LitElement {
       }
 
       console.log('First updated end');
+    }
+  }
+
+  /** Apply backgroundColor config to the scene and content div. Safe to call on fresh load AND cache restore. */
+  private _applyBackground(): void {
+    if (!this._scene || !this._renderer) return;
+    const bg = this._config.backgroundColor || '';
+    if (bg === 'transparent') {
+      this._scene.background = null;
+      this._renderer.setClearColor(0x000000, 0);
+      if (this._content) this._content.style.background = '';
+    } else if (/gradient|url\s*\(/i.test(bg)) {
+      // CSS gradient / image — make the WebGL canvas transparent and apply as CSS.
+      this._scene.background = null;
+      this._renderer.setClearColor(0x000000, 0);
+      if (this._content) this._content.style.background = bg;
+    } else if (bg) {
+      // Solid colour — hand off to THREE.js for integrated scene background.
+      if (this._content) this._content.style.background = '';
+      this._scene.background = new THREE.Color(bg);
+    } else {
+      if (this._content) this._content.style.background = '';
+      this._scene.background = new THREE.Color('#aaaaaa');
     }
   }
 
@@ -1608,25 +1635,7 @@ export class Floor3dCard extends LitElement {
     this._renderer.domElement.style.height = '100%';
     this._renderer.domElement.style.display = 'block';
 
-    if (this._config.backgroundColor) {
-      const bg = this._config.backgroundColor;
-      if (bg === 'transparent') {
-        this._renderer.setClearColor(0x000000, 0);
-      } else if (/gradient|url\s*\(/i.test(bg)) {
-        // CSS background value (gradient, image url, etc.).
-        // Make the WebGL canvas transparent so the value applied to _content
-        // shows through behind the 3D geometry.
-        this._renderer.setClearColor(0x000000, 0);
-        if (this._content) this._content.style.background = bg;
-      } else {
-        // Solid colour — hand off to THREE.js for integrated scene background.
-        if (this._content) this._content.style.background = '';
-        this._scene.background = new THREE.Color(bg);
-      }
-    } else {
-      if (this._content) this._content.style.background = '';
-      this._scene.background = new THREE.Color('#aaaaaa');
-    }
+    this._applyBackground();
 
     //this._renderer.physicallyCorrectLights = true;
     if (this._config.sky && this._config.sky == 'yes') {
