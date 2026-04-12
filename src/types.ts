@@ -255,6 +255,17 @@ export interface Floor3dCardConfig {
   // entity is also updated, so automations / other cards can read the current zoom.
   zoom_entity?: string;
 
+  // --- New: Dynamic sky / weather ---
+  // HA weather entity (e.g. "weather.home") — drives sky turbidity/fog + CSS precipitation overlay.
+  weather_entity?: string;
+  // 'yes'/'no' — show CSS rain/snow/wind/sand particles (default 'yes' when weather_entity set).
+  weather_precipitation?: string;
+  // 'yes'/'no' — show moon with lunar phase at night when sky:'yes' (default 'yes').
+  show_moon?: string;
+  // Optional HA moon phase sensor whose state is the phase name (e.g. "full_moon", "new_moon").
+  // When omitted, lunar phase is computed from the current date.
+  moon_entity?: string;
+
   // CSS backdrop-filter applied to the 3D viewport, e.g. "blur(10px) saturate(180%)".
   // When set, the ha-card background is automatically made transparent so the
   // blurred content behind the card is visible through the semi-transparent backgroundColor.
