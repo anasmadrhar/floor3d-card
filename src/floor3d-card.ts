@@ -818,12 +818,39 @@ export class Floor3dCard extends LitElement {
   private _applyBackground(): void {
     if (!this._scene || !this._renderer) return;
     const bg = this._config.backgroundColor || '';
+
+    // Any value that has inherent alpha: transparent keyword, rgba(), hsla(), or CSS gradients.
+    // These all require the ha-card shell to be transparent so the page background shows through.
+    const isCssAlpha =
+      /^transparent$/i.test(bg) ||
+      /rgba?\s*\(/i.test(bg) ||
+      /hsla?\s*\(/i.test(bg) ||
+      /gradient|url\s*\(/i.test(bg);
+
+    // Override ha-card's themed background (HA theme uses --ha-card-background which defaults to white).
+    if (this._card) {
+      if (isCssAlpha) {
+        this._card.style.setProperty('--ha-card-background', 'transparent');
+        this._card.style.background = 'transparent';
+      } else {
+        this._card.style.removeProperty('--ha-card-background');
+        this._card.style.background = '';
+      }
+    }
+
+    // Apply backdrop-filter (blur, etc.) to _content for glassmorphism effects.
+    if (this._content) {
+      const filter = this._config.backdrop_filter || '';
+      (this._content.style as any).backdropFilter = filter;
+      (this._content.style as any).webkitBackdropFilter = filter;
+    }
+
     if (bg === 'transparent') {
       this._scene.background = null;
       this._renderer.setClearColor(0x000000, 0);
       if (this._content) this._content.style.background = '';
-    } else if (/gradient|url\s*\(/i.test(bg)) {
-      // CSS gradient / image — make the WebGL canvas transparent and apply as CSS.
+    } else if (isCssAlpha) {
+      // CSS value with potential alpha (rgba, hsla, gradient, url) — apply as CSS background.
       this._scene.background = null;
       this._renderer.setClearColor(0x000000, 0);
       if (this._content) this._content.style.background = bg;
