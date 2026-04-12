@@ -1191,6 +1191,7 @@ export class Floor3dCard extends LitElement {
   public set hass(hass: HomeAssistant) {
     try {
       //called by Home Assistant Lovelace when a change of state is detected in entities
+      const prevHass = this._hass; // capture BEFORE update for change detection
       this._hass = hass;
       if (this._config.entities) {
         if (!this._states) {
@@ -1472,10 +1473,8 @@ export class Floor3dCard extends LitElement {
 
           // --- Dynamic sky live updates ---
           if (this._config.sky === 'yes' && this._sky) {
-            const prevHass = this._hass;
-
             // Sun position: update when azimuth or elevation changes
-            const sunState    = hass.states['sun.sun'];
+            const sunState     = hass.states['sun.sun'];
             const prevSunState = prevHass?.states['sun.sun'];
             const azimuthChanged   = sunState?.attributes?.['azimuth']   !== prevSunState?.attributes?.['azimuth'];
             const elevationChanged = sunState?.attributes?.['elevation'] !== prevSunState?.attributes?.['elevation'];
@@ -1491,7 +1490,7 @@ export class Floor3dCard extends LitElement {
           // Weather entity: update sky + particles when state changes
           if (this._config.weather_entity) {
             const ws  = hass.states[this._config.weather_entity];
-            const pws = this._hass?.states[this._config.weather_entity];
+            const pws = prevHass?.states[this._config.weather_entity];
             if (ws?.state !== pws?.state) {
               this._updateWeatherSky(ws.state);
               this._createWeatherParticles(ws.state);
@@ -1501,7 +1500,7 @@ export class Floor3dCard extends LitElement {
           // Moon phase entity: rebuild moon texture when state changes
           if (this._config.moon_entity) {
             const ms  = hass.states[this._config.moon_entity];
-            const pms = this._hass?.states[this._config.moon_entity];
+            const pms = prevHass?.states[this._config.moon_entity];
             if (ms?.state !== pms?.state) {
               this._updateMoonPhase();
             }
