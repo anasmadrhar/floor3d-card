@@ -169,8 +169,8 @@ export class Floor3dCard extends LitElement {
 
   // --- Dynamic sky / sun / moon / weather ---
   private _sunDirection?: THREE.Vector3;    // normalized sun direction in world space
-  private _moonMesh?: THREE.Sprite;         // cartoon moon sprite in scene
-  private _sunSprite?: THREE.Sprite;        // cartoon sun sprite in scene
+  private _moonMesh?: THREE.Mesh;           // moon 3D sphere in scene
+  private _sunMesh?: THREE.Mesh;            // sun 3D sphere in scene
   private _weatherSystem?: {               // active 3D weather particle system
     mesh: THREE.Points | THREE.LineSegments;
     velArray: Float32Array;                // [vx, vy, vz] per particle (Points) or per segment-pair (LineSegments)
@@ -1568,11 +1568,12 @@ export class Floor3dCard extends LitElement {
     console.log('Init Sky');
 
     this._sky = new Sky();
-    this._sky.scale.setScalar(100000);
+    const skyScale = this._config.sky_distance ?? 100000;
+    this._sky.scale.setScalar(skyScale);
     this._scene.add(this._sky);
 
-    // Expand far plane so the sky sphere (scale=100000) is within the frustum
-    this._camera.far = 200000;
+    // Camera far plane must exceed the sky dome scale
+    this._camera.far = Math.max(skyScale * 2, 200000);
     this._camera.updateProjectionMatrix();
 
     const uniforms = this._sky.material.uniforms;
@@ -1637,9 +1638,9 @@ export class Floor3dCard extends LitElement {
     // Position sun from current sun.sun entity state
     this._updateSunPosition();
 
-    // Initialise cartoon moon and sun sprites above model
+    // Initialise 3D moon and sun spheres above model
     this._initMoon();
-    this._initSunSprite();
+    this._initSunMesh();
 
     //FOR DEBUG: this._scene.add(new THREE.CameraHelper(this._sun.shadow.camera));
   }
@@ -1684,7 +1685,7 @@ export class Floor3dCard extends LitElement {
 
     // Normalized direction used for moon antipodal positioning
     this._sunDirection = sunDir.normalize();
-    this._updateSunSpritePosition();
+    this._updateSunMeshPosition();
   }
 
   /** Update THREE.js sky shader uniforms + scene fog to match a HA weather state. */
@@ -1799,68 +1800,17 @@ export class Floor3dCard extends LitElement {
     return new THREE.CanvasTexture(canvas);
   }
 
-  /** Build a cartoon sun canvas texture (yellow circle with rays). */
-  private _buildSunTexture(): THREE.CanvasTexture {
-    const S = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = S;
-    const ctx = canvas.getContext('2d')!;
-    const cx = S / 2, cy = S / 2, r = S / 2 - 20;
-
-    // Outer warm glow
-    const glow = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, S / 2);
-    glow.addColorStop(0, 'rgba(255,200,50,0.45)');
-    glow.addColorStop(1, 'rgba(255,140,0,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, S, S);
-
-    // Rays (8 short rays)
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,190,30,0.75)';
-    ctx.lineWidth = 5;
-    ctx.lineCap = 'round';
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const x1 = cx + Math.cos(angle) * (r + 4);
-      const y1 = cy + Math.sin(angle) * (r + 4);
-      const x2 = cx + Math.cos(angle) * (r + 18);
-      const y2 = cy + Math.sin(angle) * (r + 18);
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // Sun body
-    const sunGrad = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, 0, cx, cy, r);
-    sunGrad.addColorStop(0, '#fffaaa');
-    sunGrad.addColorStop(0.4, '#ffdd00');
-    sunGrad.addColorStop(0.8, '#ffaa00');
-    sunGrad.addColorStop(1, '#ff8800');
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = sunGrad;
-    ctx.fill();
-
-    // Subtle highlight
-    ctx.beginPath();
-    ctx.arc(cx - r * 0.25, cy - r * 0.25, r * 0.22, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.30)';
-    ctx.fill();
-
-    return new THREE.CanvasTexture(canvas);
-  }
-
-  /** Initialise cartoon moon sprite and add to scene. Called from _initSky(). */
+  /** Initialise the 3D moon mesh with phase texture. Called from _initSky(). */
   private _initMoon(): void {
     if (this._config.show_moon === 'no') return;
 
-    // Clean up any existing moon
+    // Clean up existing
     if (this._moonMesh) {
       this._scene.remove(this._moonMesh);
-      (this._moonMesh.material as THREE.SpriteMaterial).map?.dispose();
-      (this._moonMesh.material as THREE.SpriteMaterial).dispose();
+      (this._moonMesh.material as THREE.MeshStandardMaterial).map?.dispose();
+      (this._moonMesh.material as THREE.MeshStandardMaterial).emissiveMap?.dispose();
+      this._moonMesh.geometry.dispose();
+      (this._moonMesh.material as THREE.Material).dispose();
       this._moonMesh = undefined;
     }
 
@@ -1869,65 +1819,64 @@ export class Floor3dCard extends LitElement {
     const phase = this._computeMoonPhase(moonState);
     const tex   = this._buildMoonTexture(phase);
 
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
-    const sprite = new THREE.Sprite(mat);
-    sprite.name = '__f3d_moon';
-    sprite.visible = false;
-
-    const sz = (this._modelBboxDiagonal || 300) * 0.12;
-    sprite.scale.set(sz, sz, 1);
-
-    this._moonMesh = sprite;
-    this._scene.add(sprite);
+    const r = (this._modelBboxDiagonal || 300) * 0.06;
+    const geo = new THREE.SphereGeometry(r, 32, 32);
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      emissiveMap: tex,
+      emissive: new THREE.Color(0xffffff),
+      emissiveIntensity: 0.9,
+      roughness: 1,
+      metalness: 0,
+    });
+    this._moonMesh = new THREE.Mesh(geo, mat);
+    this._moonMesh.name = '__f3d_moon';
+    this._moonMesh.visible = false;
+    this._scene.add(this._moonMesh);
     this._updateMoonPosition();
   }
 
-  /** Initialise cartoon sun sprite and add to scene. Called from _initSky(). */
-  private _initSunSprite(): void {
-    // Clean up existing sun sprite
-    if (this._sunSprite) {
-      this._scene.remove(this._sunSprite);
-      (this._sunSprite.material as THREE.SpriteMaterial).map?.dispose();
-      (this._sunSprite.material as THREE.SpriteMaterial).dispose();
-      this._sunSprite = undefined;
+  /** Initialise the 3D sun sphere mesh. Called from _initSky(). */
+  private _initSunMesh(): void {
+    // Clean up existing
+    if (this._sunMesh) {
+      this._scene.remove(this._sunMesh);
+      this._sunMesh.geometry.dispose();
+      (this._sunMesh.material as THREE.Material).dispose();
+      this._sunMesh = undefined;
     }
 
-    const tex = this._buildSunTexture();
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
-    const sprite = new THREE.Sprite(mat);
-    sprite.name = '__f3d_sun';
-    sprite.visible = false;
-
-    const sz = (this._modelBboxDiagonal || 300) * 0.10;
-    sprite.scale.set(sz, sz, 1);
-
-    this._sunSprite = sprite;
-    this._scene.add(sprite);
-    this._updateSunSpritePosition();
+    const r = (this._modelBboxDiagonal || 300) * 0.075;
+    const geo = new THREE.SphereGeometry(r, 32, 32);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffdd44,
+      fog: false,
+    });
+    this._sunMesh = new THREE.Mesh(geo, mat);
+    this._sunMesh.name = '__f3d_sun';
+    this._sunMesh.visible = false;
+    this._scene.add(this._sunMesh);
+    this._updateSunMeshPosition();
   }
 
-  /** Position cartoon moon sprite above the model; show only at night. */
+  /** Position moon sphere antipodal to the sun at configured distance; show only at night. */
   private _updateMoonPosition(): void {
-    if (!this._moonMesh) return;
+    if (!this._moonMesh || !this._sunDirection) return;
     const isNight = this._hass?.states['sun.sun']?.state === 'below_horizon';
     this._moonMesh.visible = isNight;
-    if (isNight) {
-      const d = this._modelBboxDiagonal || 300;
-      // Upper-right area above the model
-      this._moonMesh.position.set(d * 0.22, d * 0.55, -d * 0.10);
-    }
+    const dist = this._config.moon_distance ?? (this._modelBboxDiagonal || 300) * 1.5;
+    const moonDir = this._sunDirection.clone().negate();
+    this._moonMesh.position.copy(moonDir.multiplyScalar(dist));
   }
 
-  /** Position cartoon sun sprite above the model; show only during daytime. */
-  private _updateSunSpritePosition(): void {
-    if (!this._sunSprite) return;
+  /** Position sun sphere along the sun direction at configured distance; show only during day. */
+  private _updateSunMeshPosition(): void {
+    if (!this._sunMesh || !this._sunDirection) return;
+    const isAboveHorizon = (this._sunDirection.y ?? 0) > -0.05;
     const isDay = this._hass?.states['sun.sun']?.state !== 'below_horizon';
-    this._sunSprite.visible = isDay && (this._sunDirection?.y ?? 0) > -0.05;
-    if (isDay) {
-      const d = this._modelBboxDiagonal || 300;
-      // Upper-left area above the model
-      this._sunSprite.position.set(-d * 0.22, d * 0.52, -d * 0.10);
-    }
+    this._sunMesh.visible = isDay && isAboveHorizon;
+    const dist = this._config.sun_distance ?? (this._modelBboxDiagonal || 300) * 1.5;
+    this._sunMesh.position.copy(this._sunDirection.clone().multiplyScalar(dist));
   }
 
   /** Rebuild the moon phase canvas texture when moon_entity state changes. */
@@ -1937,9 +1886,11 @@ export class Floor3dCard extends LitElement {
       ? this._hass?.states[this._config.moon_entity]?.state : undefined;
     const phase = this._computeMoonPhase(moonState);
     const tex   = this._buildMoonTexture(phase);
-    const mat   = this._moonMesh.material as THREE.SpriteMaterial;
+    const mat   = this._moonMesh.material as THREE.MeshStandardMaterial;
     mat.map?.dispose();
+    mat.emissiveMap?.dispose();
     mat.map = tex;
+    mat.emissiveMap = tex;
     mat.needsUpdate = true;
   }
 
