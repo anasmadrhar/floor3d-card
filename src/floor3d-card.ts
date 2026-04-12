@@ -873,6 +873,11 @@ export class Floor3dCard extends LitElement {
       // Solid colour — hand off to THREE.js for integrated scene background.
       if (this._content) this._content.style.background = '';
       this._scene.background = new THREE.Color(bg);
+    } else if (this._config?.sky === 'yes') {
+      // Sky shader renders the background — null lets it show through
+      if (this._content) this._content.style.background = '';
+      this._scene.background = null;
+      this._renderer.setClearColor(0x000000, 0);
     } else {
       if (this._content) this._content.style.background = '';
       this._scene.background = new THREE.Color('#aaaaaa');
@@ -1507,6 +1512,41 @@ export class Floor3dCard extends LitElement {
           }
         }
       }
+
+      // Sky / weather / moon live updates — run regardless of entities config
+      if (this._renderer && this._modelready) {
+        // --- Dynamic sky live updates ---
+        if (this._config.sky === 'yes' && this._sky) {
+          const sunState     = hass.states['sun.sun'];
+          const prevSunState = prevHass?.states['sun.sun'];
+          const azimuthChanged   = sunState?.attributes?.['azimuth']   !== prevSunState?.attributes?.['azimuth'];
+          const elevationChanged = sunState?.attributes?.['elevation'] !== prevSunState?.attributes?.['elevation'];
+          const dayNightChanged  = sunState?.state !== prevSunState?.state;
+          if (azimuthChanged || elevationChanged) {
+            this._updateSunPosition();
+          }
+          if (dayNightChanged || azimuthChanged || elevationChanged) {
+            this._updateMoonPosition();
+          }
+        }
+
+        if (this._config.weather_entity) {
+          const ws  = hass.states[this._config.weather_entity];
+          const pws = prevHass?.states[this._config.weather_entity];
+          if (ws?.state !== pws?.state) {
+            this._updateWeatherSky(ws.state);
+            this._createWeatherParticles(ws.state);
+          }
+        }
+
+        if (this._config.moon_entity) {
+          const ms  = hass.states[this._config.moon_entity];
+          const pms = prevHass?.states[this._config.moon_entity];
+          if (ms?.state !== pms?.state) {
+            this._updateMoonPhase();
+          }
+        }
+      }
     } catch (e) {
       console.log(e);
       throw new Error('Error in hass: ' + e);
@@ -1530,6 +1570,10 @@ export class Floor3dCard extends LitElement {
     this._sky.scale.setScalar(100000);
     this._scene.add(this._sky);
 
+    // Expand far plane so the sky sphere (scale=100000) is within the frustum
+    this._camera.far = 200000;
+    this._camera.updateProjectionMatrix();
+
     const uniforms = this._sky.material.uniforms;
     uniforms['turbidity'].value = effectController.turbidity;
     uniforms['rayleigh'].value = effectController.rayleigh;
@@ -1540,16 +1584,35 @@ export class Floor3dCard extends LitElement {
 
     console.log('Init Ground');
 
-    const groundGeo = new THREE.PlaneGeometry(10000, 10000);
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    groundMat.color.setHSL(0.095, 1, 0.75);
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.position.y = -5;
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = false;
-    ground.castShadow = false;
-    //this._bboxmodel.add(ground);
-    this._scene.add(ground);
+    if (this._config.ground !== 'none') {
+      const groundGeo = new THREE.PlaneGeometry(10000, 10000);
+      let groundColor = 0xffffff;
+      let groundOpacity = 1.0;
+      let groundTransparent = false;
+
+      if (this._config.ground === 'transparent') {
+        groundOpacity = 0.0;
+        groundTransparent = true;
+      } else if (this._config.ground) {
+        // treat as a hex color string e.g. "#4a7c2f"
+        try { groundColor = new THREE.Color(this._config.ground).getHex(); } catch (_) { /* ignore invalid */ }
+      } else {
+        // default: warm yellowish ground
+        groundColor = new THREE.Color().setHSL(0.095, 1, 0.75).getHex();
+      }
+
+      const groundMat = new THREE.MeshLambertMaterial({
+        color: groundColor,
+        transparent: groundTransparent,
+        opacity: groundOpacity,
+      });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.position.y = -5;
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = false;
+      ground.castShadow = false;
+      this._scene.add(ground);
+    }
 
     // init sun directional light
 
@@ -1581,7 +1644,18 @@ export class Floor3dCard extends LitElement {
 
   /** Reposition the sun (sky shader + directional light) from the current sun.sun entity. */
   private _updateSunPosition(): void {
-    if (!this._sky || !this._sun || !this._hass?.states['sun.sun']) return;
+    if (!this._sky || !this._sun) return;
+
+    // If sun.sun entity unavailable, use a sensible mid-afternoon default
+    // so the sky renders correctly instead of a degenerate zero-vector sun.
+    if (!this._hass?.states['sun.sun']) {
+      const fallback = new THREE.Vector3(0.5, 0.3, 0.8).normalize();
+      this._sky.material.uniforms['sunPosition'].value.copy(fallback);
+      this._sun.position.copy(fallback.clone().multiplyScalar(5000));
+      this._sun.intensity = 2.0;
+      this._sunDirection = fallback;
+      return;
+    }
 
     const attrs = this._hass.states['sun.sun'].attributes;
     const azimuth   = Number(attrs['azimuth']   ?? 180);
