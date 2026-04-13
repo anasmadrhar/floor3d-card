@@ -2193,9 +2193,12 @@ export class Floor3dCard extends LitElement {
       this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type, segLen: 0 };
     };
 
+    // Apply particle_density multiplier to all counts (default 1.0).
+    const densityMul = Math.max(0.1, this._config?.particle_density ?? 1.0);
+
     // Rain / Pouring / Snowy-rainy: LineSegments (streak look)
     if (state === 'rainy' || state === 'lightning-rainy' || state === 'pouring' || state === 'snowy-rainy') {
-      const count  = state === 'pouring' ? 1500 : state === 'snowy-rainy' ? 500 : 900;
+      const count  = Math.round((state === 'pouring' ? 600 : state === 'snowy-rainy' ? 220 : 400) * densityMul);
       const segLen = state === 'pouring' ? 18 : 12;
       const col    = state === 'pouring' ? 0x8899cc : 0x99aadd;
 
@@ -2245,7 +2248,7 @@ export class Floor3dCard extends LitElement {
 
     // Snow
     if (state === 'snowy') {
-      const count = 800;
+      const count = Math.round(350 * densityMul);
       const tex   = this._makeDiscSprite('rgba(220,235,255,0.95)');
       const positions  = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
@@ -2264,7 +2267,7 @@ export class Floor3dCard extends LitElement {
 
     // Hail
     if (state === 'hail') {
-      const count = 500;
+      const count = Math.round(200 * densityMul);
       const tex   = this._makeDiscSprite('rgba(210,225,255,0.98)');
       const positions  = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
@@ -2283,7 +2286,7 @@ export class Floor3dCard extends LitElement {
 
     // Sandstorm / dust — keep low (below model top) so it doesn't bury the house
     if (state === 'sandstorm' || state === 'dust' || state === 'exceptional') {
-      const count = 800;
+      const count = Math.round(350 * densityMul);
       const tex   = this._makeDiscSprite('rgba(200,155,70,0.82)');
       const sandMaxY = maxY * 0.45; // stay below roofline
       const positions  = new Float32Array(count * 3);
@@ -2349,8 +2352,9 @@ export class Floor3dCard extends LitElement {
     // Speed: world units/s proportional to km/h
     const baseSpeed = windSpeed * 12; // 20 km/h → 240 u/s, 60 km/h → 720 u/s
 
-    // Count: proportional to wind speed, capped
-    const count = Math.min(Math.floor(windSpeed * 8), 400);
+    // Count: proportional to wind speed, capped; scaled by particle_density
+    const densityMulWind = Math.max(0.1, this._config?.particle_density ?? 1.0);
+    const count = Math.max(1, Math.round(Math.min(Math.floor(windSpeed * 8), 200) * densityMulWind));
 
     const positions  = new Float32Array(count * 6);
     const speeds     = new Float32Array(count);
@@ -2592,6 +2596,14 @@ export class Floor3dCard extends LitElement {
     this._scene.add(this._bboxmodel);
 
     this._bboxmodel.updateMatrixWorld(true);
+
+    // Freeze local-matrix auto-recomputation on all loaded model objects.
+    // Three.js calls updateMatrix() (Euler→Quaternion→Matrix4) on every object
+    // with matrixAutoUpdate=true during each render traversal. For static objects
+    // (walls, floors, furniture) this is pure waste after the initial load.
+    // Objects that DO need updates (rotating fans, TWEEN-animated doors/covers)
+    // call updateMatrix() explicitly — see _animationLoop and TWEEN onUpdate callbacks.
+    this._bboxmodel.traverse((obj) => { obj.matrixAutoUpdate = false; });
 
     this._content.innerText = 'Finished with errors: check the console log';
 
@@ -4361,6 +4373,10 @@ export class Floor3dCard extends LitElement {
       new TWEEN.Tween(_obj.rotation)
         .to(targetRotation, 1200)
         .easing(TWEEN.Easing.Cubic.InOut)
+        .onUpdate(() => {
+          // matrixAutoUpdate is frozen; recompute local matrix after each TWEEN step.
+          (_obj as THREE.Object3D).updateMatrix();
+        })
         .onComplete(() => {
           // Stop animation loop if all tweens finished
           this._startOrStopAnimationLoop();
@@ -4436,6 +4452,10 @@ export class Floor3dCard extends LitElement {
       new TWEEN.Tween(_obj.position)
         .to(targetPosition, 1200)
         .easing(TWEEN.Easing.Cubic.InOut)
+        .onUpdate(() => {
+          // matrixAutoUpdate is frozen; recompute local matrix after each TWEEN step.
+          (_obj as THREE.Object3D).updateMatrix();
+        })
         .onComplete(() => {
           // Stop animation loop if all tweens finished
           this._startOrStopAnimationLoop();
@@ -4635,6 +4655,8 @@ export class Floor3dCard extends LitElement {
               _obj.rotation.z += this._round_per_seconds[index] * this._rotation_state[index] * rotateBy;
               break;
           }
+          // matrixAutoUpdate is frozen on loaded objects; recompute local matrix manually.
+          _obj.updateMatrix();
         }
       });
     });
