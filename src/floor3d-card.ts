@@ -85,7 +85,9 @@ export class Floor3dCard extends LitElement {
   private _zoombar?: HTMLElement;
   private _selectionbar?: HTMLElement;
   private _weatherbar?: HTMLElement;
+  private _animationsbar?: HTMLElement;
   private _weatherAnimationsEnabled = true;
+  private _animationsEnabled = true;
   private _controls?: OrbitControls;
   private _hemiLight?: THREE.HemisphereLight;
   private _modelX?: number;
@@ -2603,11 +2605,13 @@ export class Floor3dCard extends LitElement {
       this._zoombar = document.createElement('div');
       this._selectionbar = document.createElement('div');
       this._weatherbar = document.createElement('div');
+      this._animationsbar = document.createElement('div');
       this._content.innerText = '';
       this._content.appendChild(this._levelbar);
       this._content.appendChild(this._zoombar);
       this._content.appendChild(this._selectionbar);
       this._content.appendChild(this._weatherbar);
+      this._content.appendChild(this._animationsbar);
       this._content.appendChild(this._renderer.domElement);
       this._selectedlevel = -1;
 
@@ -2882,6 +2886,67 @@ export class Floor3dCard extends LitElement {
     if (!enabled) this._render();
 
     if (this._weatherbar) render(this._getWeatherBar(), this._weatherbar);
+  }
+
+  /**
+   * Render the room-animations toggle button (bottom-right, to the left of weather button).
+   * Only shown when animations are configured and hide_animations_ui !== 'yes'.
+   */
+  private _getAnimationsBar(): TemplateResult {
+    if (!this._config?.animations?.length) return html``;
+    if (this._config.hide_animations_ui === 'yes') return html``;
+
+    const on   = this._animationsEnabled;
+    const icon = on ? 'mdi:music-note' : 'mdi:music-note-off';
+    // Offset left enough to clear the weather button (if present) without hardcoding
+    const rightOffset = this._config.weather_entity && this._config.hide_weather_ui !== 'yes'
+      ? 54   // weather button is at right:10, so sit 44px to its left
+      : 10;
+
+    return html`
+      <div style="position:absolute;bottom:10px;right:${rightOffset}px;z-index:10;pointer-events:auto;">
+        <div
+          title="${on ? 'Hide room animations' : 'Show room animations'}"
+          style="
+            background:rgba(0,0,0,0.55);
+            border-radius:50%;
+            width:36px;height:36px;
+            display:flex;align-items:center;justify-content:center;
+            cursor:pointer;
+            box-shadow:0 2px 6px rgba(0,0,0,0.4);
+            opacity:${on ? 0.75 : 0.45};
+            transition:opacity 0.2s;
+          "
+          @click=${this._handleAnimationsToggleClick.bind(this)}
+        >
+          <ha-icon .icon=${icon} style="color:white;width:22px;height:22px;"></ha-icon>
+        </div>
+      </div>
+    `;
+  }
+
+  private _handleAnimationsToggleClick(ev): void {
+    ev.stopPropagation();
+    this._animationsEnabled = !this._animationsEnabled;
+    const enabled = this._animationsEnabled;
+
+    // Immediately hide/show all particle systems
+    for (const sys of this._animParticleSystems.values()) {
+      sys.active = enabled && sys.active; // keep active=false if it was already false
+      if (!enabled) {
+        sys.active = false;
+        if (sys.sprites) sys.sprites.forEach(s => { s.visible = false; });
+        if (sys.mesh)    sys.mesh.visible = false;
+      }
+    }
+
+    // When re-enabling, let _updateMarkersAndControls re-evaluate entity states
+    if (enabled && this._hass) this._updateMarkersAndControls(this._hass);
+
+    this._startOrStopAnimationLoop();
+    if (!enabled) this._render();
+
+    if (this._animationsbar) render(this._getAnimationsBar(), this._animationsbar);
   }
 
   private _getZoomBar(): TemplateResult {
@@ -4965,8 +5030,9 @@ export class Floor3dCard extends LitElement {
       }
     }
 
-    // Render weather toggle button
-    if (this._weatherbar) render(this._getWeatherBar(), this._weatherbar);
+    // Render weather + animations toggle buttons
+    if (this._weatherbar)    render(this._getWeatherBar(),    this._weatherbar);
+    if (this._animationsbar) render(this._getAnimationsBar(), this._animationsbar);
 
     // Build marker elements
     if (this._config.markers) {
@@ -5654,7 +5720,7 @@ export class Floor3dCard extends LitElement {
           continue;
         }
 
-        let shouldBeActive = visibleWhen;
+        let shouldBeActive = visibleWhen && this._animationsEnabled;
 
         if (anim.type === 'music_notes') {
           const activeState  = anim.active_state || 'playing';
