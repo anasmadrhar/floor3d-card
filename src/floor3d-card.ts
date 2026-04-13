@@ -88,6 +88,8 @@ export class Floor3dCard extends LitElement {
   private _animationsbar?: HTMLElement;
   private _weatherAnimationsEnabled = true;
   private _animationsEnabled = true;
+  private _renderPending = false;
+  private _lastFrameTime = 0;
   private _controls?: OrbitControls;
   private _hemiLight?: THREE.HemisphereLight;
   private _modelX?: number;
@@ -931,14 +933,21 @@ export class Floor3dCard extends LitElement {
   private _render(): void {
     //render the model
     if (!this._renderer) return;
-    if (this._torch) {
-      this._torch.position.copy(this._camera.position);
-      this._torch.rotation.copy(this._camera.rotation);
-      this._camera.getWorldDirection(this._torch.target.position);
-      //console.log(this._renderer.info);
-    }
-    this._renderer.render(this._scene, this._camera);
-    this._updateOverlayPositions();
+    // Batch multiple synchronous hass-triggered render calls into a single GPU frame.
+    if (this._renderPending) return;
+    this._renderPending = true;
+    requestAnimationFrame(() => {
+      this._renderPending = false;
+      if (!this._renderer || !this._scene || !this._camera) return;
+      if (this._torch) {
+        this._torch.position.copy(this._camera.position);
+        this._torch.rotation.copy(this._camera.rotation);
+        this._camera.getWorldDirection(this._torch.target.position);
+        //console.log(this._renderer.info);
+      }
+      this._renderer.render(this._scene, this._camera);
+      this._updateOverlayPositions();
+    });
   }
 
   private _getintersect(e: any): THREE.Intersection[] {
@@ -2632,7 +2641,9 @@ export class Floor3dCard extends LitElement {
 
       this._controls = new OrbitControls(this._camera, this._renderer.domElement);
 
-      this._renderer.setPixelRatio(window.devicePixelRatio);
+      // Cap DPR to reduce pixel count on HiDPI/Retina screens (2–3× DPR devices).
+      // Default cap of 1.5 cuts 44–75% of pixels vs native DPR with minimal quality loss.
+      this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._config?.max_pixel_ratio ?? 1.5));
 
       this._controls.maxPolarAngle = (0.85 * Math.PI) / 2;
       this._controls.addEventListener('change', this._changeListener);
@@ -4585,8 +4596,16 @@ export class Floor3dCard extends LitElement {
   }
 
   private _animationLoop() {
+    // FPS cap: bail out early when running faster than the configured target.
+    // setAnimationLoop fires at vsync (~60fps); we only do GPU work at target_fps.
+    const now = performance.now();
+    const targetMs = 1000 / Math.min(60, Math.max(5, this._config?.target_fps ?? 30));
+    if (now - this._lastFrameTime < targetMs) return;
+    this._lastFrameTime = now;
+
     if (!this._clock) this._clock = new THREE.Clock();
-    const clockDelta = this._clock.getDelta();
+    // Cap delta to prevent particle/rotation jumps after tab-blur or FPS catch-up.
+    const clockDelta = Math.min(this._clock.getDelta(), 0.1);
     let rotateBy = clockDelta * Math.PI * 2;
 
     this._rotation_state.forEach((state, index) => {
@@ -4821,7 +4840,6 @@ export class Floor3dCard extends LitElement {
       }
     }
 
-    this._renderer.shadowMap.needsUpdate = true;
     this._renderer.render(this._scene, this._camera);
     this._updateOverlayPositions();
   }

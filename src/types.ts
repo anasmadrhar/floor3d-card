@@ -317,6 +317,16 @@ export interface Floor3dCardConfig {
   cloud_distance?: number;
   // Size multiplier for cloud sphere clusters (default 1.0).
   cloud_size?: number;
+
+  // --- Performance tuning ---
+  // Cap device-pixel-ratio used for rendering. On HiDPI/Retina screens (DPR 2–3)
+  // the default 1.5 cap reduces pixel count by 44–75% vs native DPR.
+  // Set to a higher value (e.g. 2) for sharper output if GPU headroom allows.
+  max_pixel_ratio?: number;
+  // Target frames-per-second for the Three.js animation loop (default 30).
+  // The card only needs 60fps if you have fast-moving animations; 30fps is
+  // imperceptible for typical home-automation visualisations.
+  target_fps?: number;
 }
 
 export interface EntityFloor3dCardConfig {
