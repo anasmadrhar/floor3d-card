@@ -257,6 +257,10 @@ export interface Floor3dCardConfig {
   // --- New: Zoom control ---
   hide_zoom_areas_ui?: string; // 'yes' hides the built-in zoom selector in the bottom-left
 
+  // --- New: Weather animations toggle button ---
+  // 'yes' hides the cloud/weather toggle icon that appears in the bottom-right when weather_entity is set.
+  hide_weather_ui?: string;
+
   // --- New: Zoom entity ---
   // Set to an input_select (or any HA entity whose state is the zoom area name).
   // floor3d-card watches this entity and flies the camera to the matching zoom area
