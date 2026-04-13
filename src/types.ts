@@ -280,6 +280,11 @@ export interface Floor3dCardConfig {
   // Reduce for a "closer horizon" feel.
   sky_distance?: number;
 
+  // 'no' — hide the sky atmosphere mesh so the scene background is transparent.
+  // Sun direction, lighting, moon/sun spheres, and weather particles still work.
+  // Combine with backgroundColor:'transparent' to see the page behind the card.
+  sky_background?: string;
+
   // Distance of the sun/moon 3D spheres from scene center (world units).
   // Defaults to 1.5× the model's bounding-box diagonal if omitted.
   sun_distance?: number;

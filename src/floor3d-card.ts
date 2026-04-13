@@ -1570,7 +1570,6 @@ export class Floor3dCard extends LitElement {
     this._sky = new Sky();
     const skyScale = this._config.sky_distance ?? 100000;
     this._sky.scale.setScalar(skyScale);
-    this._scene.add(this._sky);
 
     // Camera far plane must exceed the sky dome scale
     this._camera.far = Math.max(skyScale * 2, 200000);
@@ -1581,6 +1580,17 @@ export class Floor3dCard extends LitElement {
     uniforms['rayleigh'].value = effectController.rayleigh;
     uniforms['mieCoefficient'].value = effectController.mieCoefficient;
     uniforms['mieDirectionalG'].value = effectController.mieDirectionalG;
+
+    // Only add the sky mesh when sky_background is not 'no'.
+    // With 'no', the sun direction / lighting / moon / weather still work
+    // but the scene background stays transparent.
+    if (this._config.sky_background !== 'no') {
+      this._scene.add(this._sky);
+    } else {
+      // Ensure the renderer is fully transparent so the page shows through.
+      this._scene.background = null;
+      this._renderer.setClearColor(0x000000, 0);
+    }
 
     // init ground
 
