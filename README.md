@@ -610,52 +610,56 @@ room_controls:
 
 ## Room Animations
 
-Animated overlays anchored to 3D positions — music notes above speakers, airflow from AC units.
+True 3D particle animations anchored to scene objects — musical notes that jump out of a speaker in 3D space, and airflow streaks that fan out from an AC unit in a configurable direction. Both are rendered inside the THREE.js scene (not as HTML overlays) so they move naturally when you orbit the camera.
 
 ### Music notes
 
-Shows animated floating ♪♫ notes above an anchor when a media player is playing.
+`THREE.Sprite` objects float upward from the speaker anchor, each with a smooth fade-in/out and a gentle sinusoidal drift. The animation **only activates when the media player is both playing and has volume > 0** — so a muted or paused player stays silent.
 
 ```yaml
 animations:
   - id: living_room_music
     type: music_notes
     entity: media_player.living_room_speaker
-    anchor: living_room_center
-    active_state: playing      # default: 'playing'
-    color: 'rgba(255,215,80,0.95)'
-    z_offset: 80
+    anchor: speaker_anchor         # 3D object name in the loaded model
+    active_state: playing          # default: 'playing'
+    color: 'rgba(255,215,80,0.95)' # note color (default: golden)
+    z_offset: 0                    # extra vertical shift in world units
 ```
+
+**How it looks:** Eight ♪ / ♫ sprites cycle upward one after another with staggered timing. Each note fades in, drifts sideways, and fades out as it rises — giving a continuous stream effect.
 
 ### AC airflow
 
-Shows expanding arc ripples from an AC unit. Color changes automatically with HVAC mode (cool / heat / fan-only).
+`THREE.LineSegments` streaks cycle outward from the AC anchor in a configurable cone. Color updates automatically based on `hvac_mode` / `hvac_action`.
 
 ```yaml
 animations:
-  - id: living_ac_flow
+  - id: bedroom_ac
     type: ac_flow
-    entity: climate.living_room_ac
-    anchor: ac_unit_living
-    direction: down-right      # see direction options below
-    color_cool: 'rgba(100,200,255,0.85)'
-    color_heat: 'rgba(255,130,50,0.85)'
-    color_fan:  'rgba(220,220,220,0.7)'
-    z_offset: 20
+    entity: climate.bedroom_ac
+    anchor: ac_unit_anchor          # 3D object name in the loaded model
+    flow_direction: down            # see direction options below (default: 'down')
+    color_cool: '#4fc3f7'           # cooling mode color (default: sky blue)
+    color_heat: '#ff7043'           # heating mode color (default: orange)
+    color_fan:  'rgba(210,210,210,0.85)' # fan-only color (default: light grey)
+    z_offset: 0
 ```
 
-#### Direction options
+**How it looks:** Twelve line streaks fan out from the origin in an expanding cone — the streaks spread wider as they travel away from the unit, imitating real airflow diffusion. The entire animation disappears automatically when the AC is `off` or `idle`.
 
-| Value | Visual |
+#### Flow direction options
+
+| Value | Description |
 |---|---|
-| `up` | Arcs drift upward |
-| `down` | Arcs drift downward |
-| `left` | Arcs drift left |
-| `right` | Arcs drift right |
-| `up-left` | Circles drift diagonally up-left |
-| `up-right` | Circles drift diagonally up-right |
-| `down-left` | Circles drift diagonally down-left |
-| `down-right` | Circles drift diagonally down-right (ideal for wall-mounted units) |
+| `down` | Blows downward — ideal for ceiling-mounted AC units (**default**) |
+| `up` | Blows upward — floor vents, upflow units |
+| `north` | Blows toward the model's north direction |
+| `south` | Blows toward the model's south direction |
+| `east` | Blows east (90° clockwise from north) |
+| `west` | Blows west (90° counter-clockwise from north) |
+
+The `north`/`south`/`east`/`west` values respect the card-level `north` config so the direction is always correct for your floor plan orientation.
 
 ### Animation options
 
@@ -664,17 +668,15 @@ animations:
 | `id` | string | **required** | Unique identifier |
 | `type` | string | **required** | `music_notes` or `ac_flow` |
 | `entity` | string | **required** | HA entity driving the animation |
-| `anchor` | string | **required** | Anchor ID from `anchors` |
-| `active_state` | string | `playing` | State that activates the animation (music_notes) |
-| `color` | string | golden | Note color (music_notes) |
-| `direction` | string | `up` | Airflow direction (ac_flow) |
-| `color_cool` | string | blue | Particle color in cooling mode |
-| `color_heat` | string | orange | Particle color in heating mode |
-| `color_fan` | string | grey | Particle color in fan-only mode |
-| `z_offset` | number | `0` | Vertical shift in model units |
-| `offset_x` | number | `0` | Screen-space X nudge in pixels |
-| `offset_y` | number | `0` | Screen-space Y nudge in pixels |
-| `visible_when` | condition | — | Visibility condition |
+| `anchor` | string | **required** | 3D object name used as the spawn point |
+| `active_state` | string | `playing` | State that activates the animation (`music_notes` only) |
+| `color` | string | golden | Note color (`music_notes` only) |
+| `flow_direction` | string | `down` | Airflow direction (`ac_flow` only) — see table above |
+| `color_cool` | string | `#4fc3f7` | Streak color in cooling mode (`ac_flow`) |
+| `color_heat` | string | `#ff7043` | Streak color in heating mode (`ac_flow`) |
+| `color_fan` | string | grey | Streak color in fan-only mode (`ac_flow`) |
+| `z_offset` | number | `0` | Vertical shift of the anchor in world units |
+| `visible_when` | condition | — | Additional visibility condition |
 
 ---
 
