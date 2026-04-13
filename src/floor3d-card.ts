@@ -84,6 +84,8 @@ export class Floor3dCard extends LitElement {
   private _levelbar?: HTMLElement;
   private _zoombar?: HTMLElement;
   private _selectionbar?: HTMLElement;
+  private _weatherbar?: HTMLElement;
+  private _weatherAnimationsEnabled = true;
   private _controls?: OrbitControls;
   private _hemiLight?: THREE.HemisphereLight;
   private _modelX?: number;
@@ -1537,11 +1539,13 @@ export class Floor3dCard extends LitElement {
             const ws  = hass.states[this._config.weather_entity];
             const pws = prevHass?.states[this._config.weather_entity];
             if (ws?.state !== pws?.state) {
-              this._updateWeatherSky(ws.state);
-              this._createWeatherParticles(ws.state);
-              this._initClouds(ws.state);
+              this._updateWeatherSky(ws.state);  // always update sky appearance
+              if (this._weatherAnimationsEnabled) {
+                this._createWeatherParticles(ws.state);
+                this._initClouds(ws.state);
+              }
             }
-            if (ws) {
+            if (ws && this._weatherAnimationsEnabled) {
               const newSpd = Number(ws.attributes?.['wind_speed']   ?? 0);
               const newBrg = Number(ws.attributes?.['wind_bearing'] ?? 270);
               const oldSpd = Number(pws?.attributes?.['wind_speed']   ?? 0);
@@ -1584,11 +1588,13 @@ export class Floor3dCard extends LitElement {
           const ws  = hass.states[this._config.weather_entity];
           const pws = prevHass?.states[this._config.weather_entity];
           if (ws?.state !== pws?.state) {
-            this._updateWeatherSky(ws.state);
-            this._createWeatherParticles(ws.state);
-            this._initClouds(ws.state);
+            this._updateWeatherSky(ws.state);  // always update sky appearance
+            if (this._weatherAnimationsEnabled) {
+              this._createWeatherParticles(ws.state);
+              this._initClouds(ws.state);
+            }
           }
-          if (ws) {
+          if (ws && this._weatherAnimationsEnabled) {
             const newSpd = Number(ws.attributes?.['wind_speed']   ?? 0);
             const newBrg = Number(ws.attributes?.['wind_bearing'] ?? 270);
             const oldSpd = Number(pws?.attributes?.['wind_speed']   ?? 0);
@@ -2596,10 +2602,12 @@ export class Floor3dCard extends LitElement {
       this._levelbar = document.createElement('div');
       this._zoombar = document.createElement('div');
       this._selectionbar = document.createElement('div');
+      this._weatherbar = document.createElement('div');
       this._content.innerText = '';
       this._content.appendChild(this._levelbar);
       this._content.appendChild(this._zoombar);
       this._content.appendChild(this._selectionbar);
+      this._content.appendChild(this._weatherbar);
       this._content.appendChild(this._renderer.domElement);
       this._selectedlevel = -1;
 
@@ -2821,6 +2829,59 @@ export class Floor3dCard extends LitElement {
         this._raycasting = this._raycasting.concat(this._raycastinglevels[index]);
       }
     });
+  }
+
+  /**
+   * Render the weather-animations toggle button (bottom-right corner).
+   * Only shown when weather_entity is configured and hide_weather_ui !== 'yes'.
+   */
+  private _getWeatherBar(): TemplateResult {
+    if (!this._config?.weather_entity) return html``;
+    if (this._config.hide_weather_ui === 'yes') return html``;
+
+    const on   = this._weatherAnimationsEnabled;
+    const icon = on ? 'mdi:weather-cloudy' : 'mdi:cloud-off-outline';
+
+    return html`
+      <div style="position:absolute;bottom:10px;right:10px;z-index:10;pointer-events:auto;">
+        <div
+          title="${on ? 'Hide weather effects' : 'Show weather effects'}"
+          style="
+            background:rgba(0,0,0,0.55);
+            border-radius:50%;
+            width:36px;height:36px;
+            display:flex;align-items:center;justify-content:center;
+            cursor:pointer;
+            box-shadow:0 2px 6px rgba(0,0,0,0.4);
+            opacity:${on ? 0.75 : 0.45};
+            transition:opacity 0.2s;
+          "
+          @click=${this._handleWeatherToggleClick.bind(this)}
+        >
+          <ha-icon .icon=${icon} style="color:white;width:22px;height:22px;"></ha-icon>
+        </div>
+      </div>
+    `;
+  }
+
+  private _handleWeatherToggleClick(ev): void {
+    ev.stopPropagation();
+    this._weatherAnimationsEnabled = !this._weatherAnimationsEnabled;
+    const enabled = this._weatherAnimationsEnabled;
+
+    // Toggle visibility of all active weather particle systems
+    if (this._weatherSystem) this._weatherSystem.mesh.visible = enabled;
+    if (this._cloudSystem)   this._cloudSystem.group.visible  = enabled;
+    if (this._windSystem)    this._windSystem.mesh.visible    = enabled;
+    if (this._lightningLight) {
+      this._lightningLight.visible = enabled;
+      if (!enabled) this._lightningLight.intensity = 0;
+    }
+
+    this._startOrStopAnimationLoop();
+    if (!enabled) this._render();
+
+    if (this._weatherbar) render(this._getWeatherBar(), this._weatherbar);
   }
 
   private _getZoomBar(): TemplateResult {
@@ -4435,12 +4496,12 @@ export class Floor3dCard extends LitElement {
 
   private _needsAnimationLoop() {
     // Check rotations, Tween, active weather / lightning / wind / clouds, and animation particles
+    const weatherRunning = this._weatherAnimationsEnabled && (
+      !!this._weatherSystem || !!this._lightningLight || !!this._windSystem || !!this._cloudSystem
+    );
     return this._rotation_state.some((item) => item !== 0) ||
            TWEEN.getAll().length > 0 ||
-           !!this._weatherSystem ||
-           !!this._lightningLight ||
-           !!this._windSystem ||
-           !!this._cloudSystem ||
+           weatherRunning ||
            [...this._animParticleSystems.values()].some(s => s.active);
   }
 
@@ -4893,14 +4954,19 @@ export class Floor3dCard extends LitElement {
       const ws = this._hass.states[this._config.weather_entity];
       if (ws) {
         this._updateWeatherSky(ws.state);
-        this._createWeatherParticles(ws.state);
-        this._initClouds(ws.state);
-        this._updateWindStreaks(
-          Number(ws.attributes?.['wind_speed']   ?? 0),
-          Number(ws.attributes?.['wind_bearing'] ?? 270),
-        );
+        if (this._weatherAnimationsEnabled) {
+          this._createWeatherParticles(ws.state);
+          this._initClouds(ws.state);
+          this._updateWindStreaks(
+            Number(ws.attributes?.['wind_speed']   ?? 0),
+            Number(ws.attributes?.['wind_bearing'] ?? 270),
+          );
+        }
       }
     }
+
+    // Render weather toggle button
+    if (this._weatherbar) render(this._getWeatherBar(), this._weatherbar);
 
     // Build marker elements
     if (this._config.markers) {
