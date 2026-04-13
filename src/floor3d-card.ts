@@ -98,6 +98,8 @@ export class Floor3dCard extends LitElement {
   // Camera-position snapshots used to skip _updateOverlayPositions when nothing moved.
   private _lastOverlayCamPos    = new THREE.Vector3();
   private _lastOverlayCamTarget = new THREE.Vector3();
+  // Entities already logged as missing — prevents the same console.log on every hass update.
+  private _loggedMissingEntities = new Set<string>();
   private _controls?: OrbitControls;
   private _hemiLight?: THREE.HemisphereLight;
   private _modelX?: number;
@@ -1351,7 +1353,10 @@ export class Floor3dCard extends LitElement {
                 this._brightness[j] = hass.states[entity.entity].attributes['brightness'];
               }
             } else {
-              console.log('Entity <' + entity.entity + '> not found');
+              if (!this._loggedMissingEntities.has(entity.entity)) {
+                this._loggedMissingEntities.add(entity.entity);
+                console.warn('floor3d-card: Entity <' + entity.entity + '> not found in hass.states');
+              }
             }
           });
           this._firstcall = false;
@@ -1501,7 +1506,10 @@ export class Floor3dCard extends LitElement {
                 }
               }
             } else {
-              console.log('Entity <' + entity.entity + '> not found');
+              if (!this._loggedMissingEntities.has(entity.entity)) {
+                this._loggedMissingEntities.add(entity.entity);
+                console.warn('floor3d-card: Entity <' + entity.entity + '> not found in hass.states');
+              }
             }
           });
           if (torerender) {
@@ -2631,6 +2639,8 @@ export class Floor3dCard extends LitElement {
       this._modelready = true;
       // Anchor positions computed from the just-loaded model; clear any stale cache.
       this._anchorWorldPosCache.clear();
+      // Reset missing-entity log deduplication so new config errors surface once.
+      this._loggedMissingEntities.clear();
       console.log('Show canvas');
       this._levelbar = document.createElement('div');
       this._zoombar = document.createElement('div');
@@ -4249,7 +4259,7 @@ export class Floor3dCard extends LitElement {
         }
         if (!this._color[i]) {
           if (entity.light.color) {
-            light.color = new THREE.Color(entity.light.color);
+            light.color = this._colorToThree(entity.light.color);
           } else {
             light.color = new THREE.Color('#ffffff');
           }
@@ -4482,7 +4492,7 @@ export class Floor3dCard extends LitElement {
 
       for (i in item.colorcondition) {
         if (this._states[index] == item.colorcondition[i].state) {
-          const colorcond: THREE.Color = new THREE.Color(item.colorcondition[i].color);
+          const colorcond: THREE.Color = this._colorToThree(item.colorcondition[i].color);
           _object.material.color.set(colorcond);
           _object.material.emissive.set(colorcond);
           defaultcolor = false;
@@ -5349,7 +5359,7 @@ export class Floor3dCard extends LitElement {
         const noteSpeed  = 0.28 * (anim.note_speed ?? 1.0);
 
         const symbols    = ['♪', '♫', '♪', '♫', '♪', '♫', '♪', '♫'];
-        const threeColor = new THREE.Color().setStyle(anim.color || 'rgba(255,215,80,0.95)');
+        const threeColor = this._colorToThree(anim.color || 'rgba(255,215,80,0.95)');
 
         const sprites: THREE.Sprite[]            = [];
         const spriteMats: THREE.SpriteMaterial[] = [];
@@ -5413,7 +5423,7 @@ export class Floor3dCard extends LitElement {
         geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
         const mat = new THREE.LineBasicMaterial({
-          color: new THREE.Color().setStyle(anim.color_cool || '#4fc3f7'),
+          color: this._colorToThree(anim.color_cool || '#4fc3f7'),
           transparent: true, opacity: 0.78, depthWrite: false,
         });
         const mesh = new THREE.LineSegments(geom, mat);
@@ -5511,6 +5521,17 @@ export class Floor3dCard extends LitElement {
     const x = ((ndc.x + 1) / 2) * this._content.clientWidth;
     const y = ((-ndc.y + 1) / 2) * this._content.clientHeight;
     return { x, y, behind };
+  }
+
+  /**
+   * Convert a CSS color string to THREE.Color, stripping any alpha component first.
+   * THREE.Color logs a console warning for rgba() strings ("Alpha component will be
+   * ignored") — silencing it here prevents the warning from firing on every hass update
+   * when the user has rgba() colors in colorcondition or light config.
+   */
+  private _colorToThree(css: string): THREE.Color {
+    const noAlpha = css.replace(/rgba\s*\(\s*([^,]+),\s*([^,]+),\s*([^,]+)\s*,[^)]*\)/gi, 'rgb($1,$2,$3)');
+    return new THREE.Color().setStyle(noAlpha);
   }
 
   /**
@@ -5825,7 +5846,8 @@ export class Floor3dCard extends LitElement {
             } else {
               colorStr = anim.color_cool || '#4fc3f7';
             }
-            (sys.material as THREE.LineBasicMaterial).color.setStyle(colorStr);
+            // Use _colorToThree to strip rgba() alpha and silence THREE.Color warnings.
+            (sys.material as THREE.LineBasicMaterial).color.copy(this._colorToThree(colorStr));
           }
         }
 
