@@ -215,18 +215,18 @@ export class Floor3dCard extends LitElement {
     spriteMats?: THREE.SpriteMaterial[];
     phases?: number[];          // per-sprite phase 0..1
     drifts?: number[];          // per-sprite x-drift amplitude
-    noteScale?: number;         // world-unit size of each sprite
+    noteScale?: number;         // world-unit base size of each sprite
+    noteSpeed?: number;         // phase-units/second (speed multiplier applied at init)
     travelDist?: number;        // world units a note travels before fade-out
     // ac_flow
     mesh?: THREE.LineSegments;
     material?: THREE.LineBasicMaterial;
-    dir?: THREE.Vector3;        // normalized flow direction
     count?: number;
     acPhases?: Float32Array;    // per-streak phase 0..1
-    segLen?: number;            // streak length in world units
-    cu?: Float32Array;          // per-streak cone offset X
-    cv?: Float32Array;          // per-streak cone offset Y
-    cw?: Float32Array;          // per-streak cone offset Z
+    maxLen?: number;            // total streak travel distance in world units
+    sdx?: Float32Array;         // per-streak direction X (normalized per-streak direction)
+    sdy?: Float32Array;         // per-streak direction Y
+    sdz?: Float32Array;         // per-streak direction Z
   }> = new Map();
   private _externalZoomHandler?: EventListener;
 
@@ -4642,7 +4642,7 @@ export class Floor3dCard extends LitElement {
         if (!sys.active) continue;
 
         if (sys.type === 'music_notes' && sys.sprites && sys.spriteMats && sys.phases) {
-          const speed      = 0.38;     // phase-units per second → ~2.6 s full cycle
+          const speed      = sys.noteSpeed!;   // stored at init (0.28 × note_speed multiplier)
           const travelDist = sys.travelDist!;
           const noteScale  = sys.noteScale!;
           const origin     = sys.origin;
@@ -4652,11 +4652,11 @@ export class Floor3dCard extends LitElement {
             sys.phases[i] += dt * speed;
             if (sys.phases[i] > 1) sys.phases[i] -= 1;
 
-            const p   = sys.phases[i];
-            const op  = Math.sin(p * Math.PI);         // 0→1→0 fade
-            const y   = origin.y + p * travelDist;
+            const p      = sys.phases[i];
+            const op     = Math.sin(p * Math.PI);   // 0→1→0 fade
+            const y      = origin.y + p * travelDist;
             const xDrift = sys.drifts![i] * Math.sin(p * Math.PI * 1.5);
-            const scl = noteScale * (0.55 + op * 0.55);
+            const scl    = noteScale * (0.55 + op * 0.55);
 
             const sprite = sys.sprites[i];
             sprite.position.set(origin.x + xDrift, y, origin.z);
@@ -4665,12 +4665,11 @@ export class Floor3dCard extends LitElement {
           }
 
         } else if (sys.type === 'ac_flow' && sys.mesh && sys.acPhases) {
-          const speed  = 0.42;   // phase-units per second → ~2.4 s per streak cycle
-          const dir    = sys.dir!;
-          const segLen = sys.segLen!;
+          const speed  = 0.42;   // ~2.4 s per streak cycle
           const origin = sys.origin;
           const count  = sys.count!;
-          const cu     = sys.cu!; const cv = sys.cv!; const cw = sys.cw!;
+          const maxLen = sys.maxLen!;
+          const sdx    = sys.sdx!; const sdy = sys.sdy!; const sdz = sys.sdz!;
           const pos    = sys.mesh.geometry.attributes['position'].array as Float32Array;
 
           for (let i = 0; i < count; i++) {
@@ -4678,17 +4677,16 @@ export class Floor3dCard extends LitElement {
             if (sys.acPhases[i] > 1) sys.acPhases[i] -= 1;
 
             const p  = sys.acPhases[i];
-            const p0 = Math.max(0, p - 0.3);  // tail lags head by 0.3 phase
-            const maxLen = segLen * 1.5;       // total travel distance
+            const p0 = Math.max(0, p - 0.3);   // tail lags head by 0.3 phase
 
-            // Cone offset grows with distance (expand-as-you-go effect)
-            pos[i*6]   = origin.x + dir.x * p0 * maxLen + cu[i] * p0;
-            pos[i*6+1] = origin.y + dir.y * p0 * maxLen + cv[i] * p0;
-            pos[i*6+2] = origin.z + dir.z * p0 * maxLen + cw[i] * p0;
+            // Each streak travels along its own pre-computed flat-arc direction
+            pos[i*6]   = origin.x + sdx[i] * p0 * maxLen;
+            pos[i*6+1] = origin.y + sdy[i] * p0 * maxLen;
+            pos[i*6+2] = origin.z + sdz[i] * p0 * maxLen;
 
-            pos[i*6+3] = origin.x + dir.x * p * maxLen + cu[i] * p;
-            pos[i*6+4] = origin.y + dir.y * p * maxLen + cv[i] * p;
-            pos[i*6+5] = origin.z + dir.z * p * maxLen + cw[i] * p;
+            pos[i*6+3] = origin.x + sdx[i] * p * maxLen;
+            pos[i*6+4] = origin.y + sdy[i] * p * maxLen;
+            pos[i*6+5] = origin.z + sdz[i] * p * maxLen;
           }
 
           sys.mesh.geometry.attributes['position'].needsUpdate = true;
@@ -5078,31 +5076,64 @@ export class Floor3dCard extends LitElement {
   }
 
   /**
-   * Convert a direction string to a normalized THREE.Vector3 for AC flow.
-   * 'down' (default), 'up', 'north', 'south', 'east', 'west'.
+   * Convert a single direction keyword to a normalized THREE.Vector3 for AC flow.
+   * Keywords: 'down' (default), 'up', 'north', 'south', 'east', 'west', 'bottom' (alias for down).
    */
-  private _acFlowDir(direction?: string): THREE.Vector3 {
+  private _acFlowDirSingle(direction: string): THREE.Vector3 {
     const cfg = this._config;
-    // north vector in scene space (same convention as sky/wind code)
     const nx = cfg?.north?.x ?? 0;
     const nz = cfg?.north?.z ?? -1;
-    // east = rotate north 90° clockwise in XZ plane
-    const ex = nz; const ez = -nx;
-    switch (direction) {
-      case 'up':    return new THREE.Vector3(0, 1, 0);
-      case 'north': return new THREE.Vector3(nx, 0, nz).normalize();
-      case 'south': return new THREE.Vector3(-nx, 0, -nz).normalize();
-      case 'east':  return new THREE.Vector3(ex, 0, ez).normalize();
-      case 'west':  return new THREE.Vector3(-ex, 0, -ez).normalize();
-      case 'down':
-      default:      return new THREE.Vector3(0, -1, 0);
+    const ex = nz; const ez = -nx;   // east = 90° CW from north in XZ plane
+    switch (direction.trim().toLowerCase()) {
+      case 'up':                return new THREE.Vector3(0, 1, 0);
+      case 'north':             return new THREE.Vector3(nx, 0, nz).normalize();
+      case 'south':             return new THREE.Vector3(-nx, 0, -nz).normalize();
+      case 'east':              return new THREE.Vector3(ex, 0, ez).normalize();
+      case 'west':              return new THREE.Vector3(-ex, 0, -ez).normalize();
+      case 'down': case 'bottom':
+      default:                  return new THREE.Vector3(0, -1, 0);
     }
   }
 
   /**
+   * Parse a flow_direction string into a normalized THREE.Vector3.
+   *   • Single keyword : 'down', 'up', 'north', 'south', 'east', 'west'
+   *   • Compound       : 'north|down', 'south|east'  (pipe-separated, sum + normalize)
+   *   • Raw vector     : '0.7,-0.3,0'  (comma-separated x,y,z — auto-normalized)
+   */
+  private _acFlowDir(direction?: string): THREE.Vector3 {
+    if (!direction) return new THREE.Vector3(0, -1, 0);
+
+    // Raw xyz vector e.g. "0.7,-0.3,0" or "0.7, -0.3, 0.5"
+    if (/^-?[\d.]+\s*,\s*-?[\d.]+\s*,\s*-?[\d.]+$/.test(direction.trim())) {
+      const parts = direction.split(',').map(s => Number(s.trim()));
+      const v = new THREE.Vector3(parts[0], parts[1], parts[2]);
+      return v.length() > 0 ? v.normalize() : new THREE.Vector3(0, -1, 0);
+    }
+
+    // Compound e.g. "north|down"
+    if (direction.includes('|')) {
+      const sum = new THREE.Vector3();
+      for (const part of direction.split('|')) sum.add(this._acFlowDirSingle(part));
+      return sum.length() > 0 ? sum.normalize() : new THREE.Vector3(0, -1, 0);
+    }
+
+    return this._acFlowDirSingle(direction);
+  }
+
+  /**
    * Create 3-D particle systems for all `animations` in the config.
-   * Music notes → THREE.Sprite objects (each with its own material for per-sprite opacity).
-   * AC flow     → THREE.LineSegments cycling outward in a cone from the anchor.
+   *
+   * Music notes → 8 THREE.Sprite objects cycling upward from the anchor.
+   *   Size  : bbox × 0.032 × note_size  (default 1.0)
+   *   Speed : 0.28 phase-units/s × note_speed  (default 1.0 ≈ 3.6 s per cycle)
+   *
+   * AC flow → 12 THREE.LineSegments fanning out in a FLAT ARC.
+   *   The streaks are distributed evenly across ±(flow_spread/2)° around the main
+   *   flow direction, all rotating around the world-up axis (Y) — giving the
+   *   characteristic left-right spread of a wall-mounted split AC louver.
+   *   For near-vertical flow the spread falls back to the north axis instead.
+   *
    * Called once when the model is ready (from _initMarkerOverlay).
    */
   private _initAnimParticleSystems(): void {
@@ -5122,29 +5153,27 @@ export class Floor3dCard extends LitElement {
       if (!origin) continue;
 
       if (anim.type === 'music_notes') {
-        // ---- Music notes: 8 sprites cycling upward from anchor ----
-        const count     = 8;
-        const noteScale = bbox * 0.05;        // world-unit sprite size
-        const travelDist = bbox * 0.18;       // max vertical travel
-        const symbols   = ['♪', '♫', '♪', '♫', '♪', '♫', '♪', '♫'];
-        const colorStr  = anim.color || 'rgba(255,215,80,0.95)';
-        // Parse CSS color for THREE.Color (rgba() stripped to rgb)
-        const threeColor = new THREE.Color().setStyle(colorStr);
+        // ---- Music notes: 8 sprites cycling upward ----
+        const count      = 8;
+        // note_size is a multiplier (default 1.0); base size is intentionally modest
+        const noteScale  = bbox * 0.032 * (anim.note_size ?? 1.0);
+        const travelDist = bbox * 0.16;
+        // note_speed is a multiplier (default 1.0); base speed ≈ 3.6 s / cycle
+        const noteSpeed  = 0.28 * (anim.note_speed ?? 1.0);
 
-        const sprites: THREE.Sprite[]       = [];
+        const symbols    = ['♪', '♫', '♪', '♫', '♪', '♫', '♪', '♫'];
+        const threeColor = new THREE.Color().setStyle(anim.color || 'rgba(255,215,80,0.95)');
+
+        const sprites: THREE.Sprite[]            = [];
         const spriteMats: THREE.SpriteMaterial[] = [];
-        const phases: number[]              = [];
-        const drifts: number[]              = [];
+        const phases: number[]                   = [];
+        const drifts: number[]                   = [];
 
         for (let i = 0; i < count; i++) {
           const tex = this._buildNoteTexture(symbols[i]);
           const mat = new THREE.SpriteMaterial({
-            map: tex,
-            color: threeColor,
-            transparent: true,
-            opacity: 0,
-            depthWrite: false,
-            sizeAttenuation: true,
+            map: tex, color: threeColor,
+            transparent: true, opacity: 0, depthWrite: false, sizeAttenuation: true,
           });
           const sprite = new THREE.Sprite(mat);
           sprite.scale.set(noteScale, noteScale, noteScale);
@@ -5153,53 +5182,46 @@ export class Floor3dCard extends LitElement {
           this._scene.add(sprite);
           sprites.push(sprite);
           spriteMats.push(mat);
-          phases.push(i / count);   // stagger so notes don't all start together
-          drifts.push((Math.random() - 0.5) * bbox * 0.07);
+          phases.push(i / count);
+          drifts.push((Math.random() - 0.5) * bbox * 0.06);
         }
 
         this._animParticleSystems.set(anim.id, {
           type: 'music_notes', active: false,
-          origin, sprites, spriteMats, phases, drifts, noteScale, travelDist,
+          origin, sprites, spriteMats, phases, drifts, noteScale, noteSpeed, travelDist,
         });
 
       } else if (anim.type === 'ac_flow') {
-        // ---- AC flow: 12 line-segment streaks fanning out from anchor ----
-        const count  = 12;
-        const dir    = this._acFlowDir(anim.flow_direction);
-        const segLen = bbox * 0.14;   // streak length in world units
-        const spread = bbox * 0.09;   // cone radius at full extension
+        // ---- AC flow: 12 streaks in a flat arc (wall-mount louver spread) ----
+        const count = 12;
+        const dir   = this._acFlowDir(anim.flow_direction);
+        const maxLen = bbox * 0.22;   // total travel distance of each streak
 
-        // Build two perpendicular axes for cone spread
-        const perpU = new THREE.Vector3();
-        const perpV = new THREE.Vector3();
-        const worldUp = new THREE.Vector3(0, 1, 0);
-        if (Math.abs(dir.dot(worldUp)) < 0.99) {
-          perpU.crossVectors(dir, worldUp).normalize();
-        } else {
-          perpU.set(1, 0, 0);
-        }
-        perpV.crossVectors(dir, perpU).normalize();
+        // Spread axis: rotate around world-UP for a horizontal left-right fan.
+        // Fall back to the scene's north direction when flow is near-vertical.
+        const worldUp  = new THREE.Vector3(0, 1, 0);
+        const nx = this._config?.north?.x ?? 0;
+        const nz = this._config?.north?.z ?? -1;
+        const spreadAxis = Math.abs(dir.dot(worldUp)) > 0.85
+          ? new THREE.Vector3(nx, 0, nz).normalize()  // near-vertical → spread along north
+          : worldUp;                                   // horizontal/diagonal → spread L/R
 
-        // Per-streak cone offsets (distributed evenly around the cone axis)
-        const cu = new Float32Array(count);
-        const cv = new Float32Array(count);
-        const cw = new Float32Array(count);
+        // Total fan arc in radians — default 110°, configurable via flow_spread
+        const spreadHalf = ((anim.flow_spread ?? 110) / 2) * (Math.PI / 180);
+
+        // Per-streak direction vectors (flat arc, evenly distributed)
+        const sdx = new Float32Array(count);
+        const sdy = new Float32Array(count);
+        const sdz = new Float32Array(count);
         for (let i = 0; i < count; i++) {
-          const angle = (i / count) * Math.PI * 2;
-          const cos   = Math.cos(angle); const sin = Math.sin(angle);
-          cu[i] = (perpU.x * cos + perpV.x * sin) * spread;
-          cv[i] = (perpU.y * cos + perpV.y * sin) * spread;
-          cw[i] = (perpU.z * cos + perpV.z * sin) * spread;
+          const t     = count <= 1 ? 0 : -1 + (2 * i) / (count - 1);  // -1 … +1
+          const angle = t * spreadHalf;
+          const rot   = new THREE.Quaternion().setFromAxisAngle(spreadAxis, angle);
+          const sd    = dir.clone().applyQuaternion(rot);
+          sdx[i] = sd.x; sdy[i] = sd.y; sdz[i] = sd.z;
         }
 
-        // Build geometry (positions updated every frame in _animationLoop)
         const positions = new Float32Array(count * 6);
-        for (let i = 0; i < count; i++) {
-          positions[i*6]   = origin.x; positions[i*6+1] = origin.y; positions[i*6+2] = origin.z;
-          positions[i*6+3] = origin.x + dir.x * segLen;
-          positions[i*6+4] = origin.y + dir.y * segLen;
-          positions[i*6+5] = origin.z + dir.z * segLen;
-        }
         const geom = new THREE.BufferGeometry();
         geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
@@ -5217,7 +5239,7 @@ export class Floor3dCard extends LitElement {
 
         this._animParticleSystems.set(anim.id, {
           type: 'ac_flow', active: false,
-          origin, mesh, material: mat, dir, count, acPhases, segLen, cu, cv, cw,
+          origin, mesh, material: mat, count, acPhases, maxLen, sdx, sdy, sdz,
         });
       }
     }

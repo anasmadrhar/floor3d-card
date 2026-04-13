@@ -127,12 +127,19 @@ export interface AnimationConfig {
   // music_notes
   active_state?: string;            // entity state that triggers animation (default: 'playing')
   color?: string;                   // note color (default: golden)
-  // ac_flow — snowflake icon, colored by HVAC mode
-  color_cool?: string;              // icon color when cooling (default: sky blue)
-  color_heat?: string;              // icon color when heating (default: orange)
-  color_fan?: string;               // icon color when fan-only (default: light gray)
-  // ac_flow direction: 'down' (default, ceiling unit), 'up', 'north', 'south', 'east', 'west'
+  note_size?: number;               // sprite size multiplier (default 1.0; < 1 = smaller, > 1 = larger)
+  note_speed?: number;              // float speed multiplier (default 1.0; < 1 = slower, > 1 = faster)
+  // ac_flow — streaks fanning out in a flat arc from the anchor
+  color_cool?: string;              // streak color when cooling (default: sky blue)
+  color_heat?: string;              // streak color when heating (default: orange)
+  color_fan?: string;               // streak color when fan-only (default: light gray)
+  // ac_flow direction:
+  //   single keyword : 'down' (default), 'up', 'north', 'south', 'east', 'west'
+  //   compound       : 'north|down', 'south|east', etc. (pipe-separated, sum + normalize)
+  //   raw vector     : '0.7,-0.3,0' (comma-separated x,y,z — auto-normalized)
   flow_direction?: string;
+  // total horizontal spread angle of the AC fan arc in degrees (default 110)
+  flow_spread?: number;
 }
 
 // ---------------------------------------------------------------------------

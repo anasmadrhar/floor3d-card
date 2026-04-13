@@ -631,7 +631,7 @@ animations:
 
 ### AC airflow
 
-`THREE.LineSegments` streaks cycle outward from the AC anchor in a configurable cone. Color updates automatically based on `hvac_mode` / `hvac_action`.
+`THREE.LineSegments` streaks fan out in a flat arc from the AC anchor — mimicking the horizontal louver spread of a wall-mounted split unit. Color updates automatically based on `hvac_mode` / `hvac_action`.
 
 ```yaml
 animations:
@@ -639,25 +639,37 @@ animations:
     type: ac_flow
     entity: climate.bedroom_ac
     anchor: ac_unit_anchor          # 3D object name in the loaded model
-    flow_direction: down            # see direction options below (default: 'down')
+    flow_direction: 'north|down'    # forward + slightly downward (wall unit)
+    flow_spread: 110                # total horizontal arc in degrees (default 110)
     color_cool: '#4fc3f7'           # cooling mode color (default: sky blue)
     color_heat: '#ff7043'           # heating mode color (default: orange)
     color_fan:  'rgba(210,210,210,0.85)' # fan-only color (default: light grey)
     z_offset: 0
 ```
 
-**How it looks:** Twelve line streaks fan out from the origin in an expanding cone — the streaks spread wider as they travel away from the unit, imitating real airflow diffusion. The entire animation disappears automatically when the AC is `off` or `idle`.
+**How it looks:** Twelve streaks are distributed evenly across the fan arc, all starting at the anchor and cycling outward together. The spread is flat (left-right) — not a 3D cone — so it looks like air coming out of a louver rather than a leaf blower. The animation disappears automatically when the AC is `off` or `idle`.
 
 #### Flow direction options
 
+`flow_direction` accepts three formats:
+
+| Format | Example | Description |
+|---|---|---|
+| Single keyword | `north` | One of the 6 cardinal directions below |
+| Compound (pipe) | `north\|down` | Sum of two or more keywords, normalized — ideal for wall ACs |
+| Raw vector | `0.7,-0.3,0` | Custom x,y,z normalized direction |
+
+**Keyword reference:**
+
 | Value | Description |
 |---|---|
-| `down` | Blows downward — ideal for ceiling-mounted AC units (**default**) |
+| `down` *(default)* | Blows downward — ceiling cassette units |
 | `up` | Blows upward — floor vents, upflow units |
-| `north` | Blows toward the model's north direction |
-| `south` | Blows toward the model's south direction |
-| `east` | Blows east (90° clockwise from north) |
-| `west` | Blows west (90° counter-clockwise from north) |
+| `north` | Horizontal, toward the model's north |
+| `south` | Horizontal, toward south |
+| `east` | Horizontal, 90° clockwise from north |
+| `west` | Horizontal, 90° counter-clockwise from north |
+| `bottom` | Alias for `down` |
 
 The `north`/`south`/`east`/`west` values respect the card-level `north` config so the direction is always correct for your floor plan orientation.
 
@@ -671,7 +683,10 @@ The `north`/`south`/`east`/`west` values respect the card-level `north` config s
 | `anchor` | string | **required** | 3D object name used as the spawn point |
 | `active_state` | string | `playing` | State that activates the animation (`music_notes` only) |
 | `color` | string | golden | Note color (`music_notes` only) |
-| `flow_direction` | string | `down` | Airflow direction (`ac_flow` only) — see table above |
+| `note_size` | number | `1.0` | Sprite size multiplier — `0.5` = half size, `2.0` = double (`music_notes`) |
+| `note_speed` | number | `1.0` | Float speed multiplier — `0.5` = half speed, `2.0` = double (`music_notes`) |
+| `flow_direction` | string | `down` | Airflow direction — keyword, compound `north\|down`, or raw `x,y,z` (`ac_flow`) |
+| `flow_spread` | number | `110` | Total horizontal fan arc in degrees (`ac_flow`) |
 | `color_cool` | string | `#4fc3f7` | Streak color in cooling mode (`ac_flow`) |
 | `color_heat` | string | `#ff7043` | Streak color in heating mode (`ac_flow`) |
 | `color_fan` | string | grey | Streak color in fan-only mode (`ac_flow`) |
