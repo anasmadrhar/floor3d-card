@@ -3058,11 +3058,45 @@ export class Floor3dCard extends LitElement {
     console.log('Material loaded end');
   }
 
+  /**
+   * Expands wildcard patterns in object_ids (e.g. "Wall_*") against the loaded scene.
+   * Must be called after the model is in the scene but before entity setup iterates _object_ids.
+   * Glob rules: * matches any sequence of characters within a name segment.
+   */
+  private _expandWildcardObjectIds(): void {
+    if (!this._scene || !this._object_ids) return;
+
+    for (const entry of this._object_ids) {
+      const needsExpansion = entry.objects.some((o) => o.object_id.includes('*'));
+      if (!needsExpansion) continue;
+
+      const expanded: { object_id: string }[] = [];
+      for (const obj of entry.objects) {
+        if (!obj.object_id.includes('*')) {
+          expanded.push(obj);
+          continue;
+        }
+        // Build a regex from the glob pattern, escaping special regex chars first
+        const escaped = obj.object_id.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+        const regex   = new RegExp('^' + escaped.replace(/\*/g, '.*') + '$');
+        this._scene.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.name && regex.test(child.name)) {
+            expanded.push({ object_id: child.name });
+          }
+        });
+      }
+      entry.objects = expanded;
+    }
+  }
+
   private _add3dObjects(): void {
     try {
       // Add-Modify the objects bound to the entities in the card config
       console.log('Add Objects Start');
       if (this._states && this._config.entities) {
+        // Expand wildcard object_ids (e.g. "Wall_*") against the loaded scene before any entity setup.
+        this._expandWildcardObjectIds();
+
         this._round_per_seconds = [];
         this._axis_to_rotate = [];
         this._rotation_state = [];
@@ -3457,6 +3491,36 @@ export class Floor3dCard extends LitElement {
                   this._levels[_foundobject.userData.level].add(_newobject);
                 });
               }
+            }
+
+            // Static opacity — set on matched objects once at load time.
+            // Works with any type3d and with wildcard object_ids.
+            if (entity.opacity !== undefined) {
+              const opVal = Math.min(1, Math.max(0, Number(entity.opacity)));
+              const applyMat = (mat: THREE.Material) => {
+                mat.transparent = opVal < 1;
+                mat.opacity = opVal;
+                mat.needsUpdate = true;
+              };
+              let j = 0;
+              this._object_ids[i].objects.forEach((element) => {
+                const obj = this._scene.getObjectByName(element.object_id);
+                if (obj) {
+                  // Apply directly to mesh materials (handles nested groups/children)
+                  (obj as THREE.Mesh).traverse((child) => {
+                    if (!(child instanceof THREE.Mesh)) return;
+                    if (Array.isArray(child.material)) {
+                      (child.material as THREE.Material[]).forEach(applyMat);
+                    } else if (child.material) {
+                      applyMat(child.material as THREE.Material);
+                    }
+                  });
+                  // Also patch cloned materials so type3d:'color' state changes preserve opacity
+                  if (this._initialmaterial[i]?.[j]) applyMat(this._initialmaterial[i][j]);
+                  if (this._clonedmaterial[i]?.[j])  applyMat(this._clonedmaterial[i][j]);
+                }
+                j++;
+              });
             }
           } catch (error) {
             console.log(error);
