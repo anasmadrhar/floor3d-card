@@ -204,6 +204,30 @@ export class Floor3dCard extends LitElement {
   private _roomControlElements: Map<string, HTMLElement> = new Map();
   private _animationElements: Map<string, HTMLElement> = new Map();
   private _markerJourneyTimeouts: Map<string, number> = new Map();
+
+  // --- 3D particle systems for music_notes and ac_flow animations ---
+  private _animParticleSystems: Map<string, {
+    type: 'music_notes' | 'ac_flow';
+    active: boolean;
+    origin: THREE.Vector3;
+    // music_notes
+    sprites?: THREE.Sprite[];
+    spriteMats?: THREE.SpriteMaterial[];
+    phases?: number[];          // per-sprite phase 0..1
+    drifts?: number[];          // per-sprite x-drift amplitude
+    noteScale?: number;         // world-unit size of each sprite
+    travelDist?: number;        // world units a note travels before fade-out
+    // ac_flow
+    mesh?: THREE.LineSegments;
+    material?: THREE.LineBasicMaterial;
+    dir?: THREE.Vector3;        // normalized flow direction
+    count?: number;
+    acPhases?: Float32Array;    // per-streak phase 0..1
+    segLen?: number;            // streak length in world units
+    cu?: Float32Array;          // per-streak cone offset X
+    cv?: Float32Array;          // per-streak cone offset Y
+    cw?: Float32Array;          // per-streak cone offset Z
+  }> = new Map();
   private _externalZoomHandler?: EventListener;
 
   // --- Mobile object-ID discovery (long-press) ---
@@ -4410,13 +4434,14 @@ export class Floor3dCard extends LitElement {
   }
 
   private _needsAnimationLoop() {
-    // Check rotations, Tween, and active weather / lightning / wind / clouds
+    // Check rotations, Tween, active weather / lightning / wind / clouds, and animation particles
     return this._rotation_state.some((item) => item !== 0) ||
            TWEEN.getAll().length > 0 ||
            !!this._weatherSystem ||
            !!this._lightningLight ||
            !!this._windSystem ||
-           !!this._cloudSystem;
+           !!this._cloudSystem ||
+           [...this._animParticleSystems.values()].some(s => s.active);
   }
 
   // If every rotating entity and Tween is stopped, disable animation
@@ -4605,6 +4630,69 @@ export class Floor3dCard extends LitElement {
           const jitter = (Math.random() - 0.5) * 0.7;
           c.mesh.position.x = Math.cos(backAngle + jitter) * r;
           c.mesh.position.z = Math.sin(backAngle + jitter) * r;
+        }
+      }
+    }
+
+    // --- 3-D animation particle systems (music notes + AC flow) ---
+    if (this._animParticleSystems.size > 0) {
+      const dt = clockDelta;
+
+      for (const sys of this._animParticleSystems.values()) {
+        if (!sys.active) continue;
+
+        if (sys.type === 'music_notes' && sys.sprites && sys.spriteMats && sys.phases) {
+          const speed      = 0.38;     // phase-units per second → ~2.6 s full cycle
+          const travelDist = sys.travelDist!;
+          const noteScale  = sys.noteScale!;
+          const origin     = sys.origin;
+          const count      = sys.sprites.length;
+
+          for (let i = 0; i < count; i++) {
+            sys.phases[i] += dt * speed;
+            if (sys.phases[i] > 1) sys.phases[i] -= 1;
+
+            const p   = sys.phases[i];
+            const op  = Math.sin(p * Math.PI);         // 0→1→0 fade
+            const y   = origin.y + p * travelDist;
+            const xDrift = sys.drifts![i] * Math.sin(p * Math.PI * 1.5);
+            const scl = noteScale * (0.55 + op * 0.55);
+
+            const sprite = sys.sprites[i];
+            sprite.position.set(origin.x + xDrift, y, origin.z);
+            sprite.scale.set(scl, scl, scl);
+            sys.spriteMats[i].opacity = op * 0.92;
+          }
+
+        } else if (sys.type === 'ac_flow' && sys.mesh && sys.acPhases) {
+          const speed  = 0.42;   // phase-units per second → ~2.4 s per streak cycle
+          const dir    = sys.dir!;
+          const segLen = sys.segLen!;
+          const origin = sys.origin;
+          const count  = sys.count!;
+          const cu     = sys.cu!; const cv = sys.cv!; const cw = sys.cw!;
+          const pos    = sys.mesh.geometry.attributes['position'].array as Float32Array;
+
+          for (let i = 0; i < count; i++) {
+            sys.acPhases[i] += dt * speed;
+            if (sys.acPhases[i] > 1) sys.acPhases[i] -= 1;
+
+            const p  = sys.acPhases[i];
+            const p0 = Math.max(0, p - 0.3);  // tail lags head by 0.3 phase
+            const maxLen = segLen * 1.5;       // total travel distance
+
+            // Cone offset grows with distance (expand-as-you-go effect)
+            pos[i*6]   = origin.x + dir.x * p0 * maxLen + cu[i] * p0;
+            pos[i*6+1] = origin.y + dir.y * p0 * maxLen + cv[i] * p0;
+            pos[i*6+2] = origin.z + dir.z * p0 * maxLen + cw[i] * p0;
+
+            pos[i*6+3] = origin.x + dir.x * p * maxLen + cu[i] * p;
+            pos[i*6+4] = origin.y + dir.y * p * maxLen + cv[i] * p;
+            pos[i*6+5] = origin.z + dir.z * p * maxLen + cw[i] * p;
+          }
+
+          sys.mesh.geometry.attributes['position'].needsUpdate = true;
+          sys.mesh.geometry.computeBoundingSphere();
         }
       }
     }
@@ -4834,14 +4922,20 @@ export class Floor3dCard extends LitElement {
       }
     }
 
-    // Build animation elements
+    // Build animation elements.
+    // music_notes and ac_flow are handled as 3D particle systems (_animParticleSystems).
+    // Any other (future) types still get an HTML overlay element.
     if (this._config.animations) {
       for (const anim of this._config.animations) {
+        if (anim.type === 'music_notes' || anim.type === 'ac_flow') continue;
         const el = this._createAnimationElement(anim);
         this._markerOverlay.appendChild(el);
         this._animationElements.set(anim.id, el);
       }
     }
+
+    // Initialise 3-D particle systems for music_notes / ac_flow animations
+    this._initAnimParticleSystems();
   }
 
   /**
@@ -4957,6 +5051,178 @@ export class Floor3dCard extends LitElement {
     });
 
     return wrapper;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3-D particle / sprite animation helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build a canvas texture containing a single musical note symbol.
+   * The texture is always white so we can tint it via SpriteMaterial.color.
+   */
+  private _buildNoteTexture(symbol: string): THREE.Texture {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${size * 0.72}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 6;
+    ctx.fillText(symbol, size / 2, size * 0.54);
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  /**
+   * Convert a direction string to a normalized THREE.Vector3 for AC flow.
+   * 'down' (default), 'up', 'north', 'south', 'east', 'west'.
+   */
+  private _acFlowDir(direction?: string): THREE.Vector3 {
+    const cfg = this._config;
+    // north vector in scene space (same convention as sky/wind code)
+    const nx = cfg?.north?.x ?? 0;
+    const nz = cfg?.north?.z ?? -1;
+    // east = rotate north 90° clockwise in XZ plane
+    const ex = nz; const ez = -nx;
+    switch (direction) {
+      case 'up':    return new THREE.Vector3(0, 1, 0);
+      case 'north': return new THREE.Vector3(nx, 0, nz).normalize();
+      case 'south': return new THREE.Vector3(-nx, 0, -nz).normalize();
+      case 'east':  return new THREE.Vector3(ex, 0, ez).normalize();
+      case 'west':  return new THREE.Vector3(-ex, 0, -ez).normalize();
+      case 'down':
+      default:      return new THREE.Vector3(0, -1, 0);
+    }
+  }
+
+  /**
+   * Create 3-D particle systems for all `animations` in the config.
+   * Music notes → THREE.Sprite objects (each with its own material for per-sprite opacity).
+   * AC flow     → THREE.LineSegments cycling outward in a cone from the anchor.
+   * Called once when the model is ready (from _initMarkerOverlay).
+   */
+  private _initAnimParticleSystems(): void {
+    // Tear down any previous systems
+    for (const sys of this._animParticleSystems.values()) {
+      if (sys.sprites) sys.sprites.forEach(s => this._scene?.remove(s));
+      if (sys.mesh)    this._scene?.remove(sys.mesh);
+    }
+    this._animParticleSystems.clear();
+
+    if (!this._config.animations || !this._scene) return;
+
+    const bbox = this._modelBboxDiagonal || 100;
+
+    for (const anim of this._config.animations) {
+      const origin = this._getAnchorWorldPos(anim.anchor, anim.z_offset || 0);
+      if (!origin) continue;
+
+      if (anim.type === 'music_notes') {
+        // ---- Music notes: 8 sprites cycling upward from anchor ----
+        const count     = 8;
+        const noteScale = bbox * 0.05;        // world-unit sprite size
+        const travelDist = bbox * 0.18;       // max vertical travel
+        const symbols   = ['♪', '♫', '♪', '♫', '♪', '♫', '♪', '♫'];
+        const colorStr  = anim.color || 'rgba(255,215,80,0.95)';
+        // Parse CSS color for THREE.Color (rgba() stripped to rgb)
+        const threeColor = new THREE.Color().setStyle(colorStr);
+
+        const sprites: THREE.Sprite[]       = [];
+        const spriteMats: THREE.SpriteMaterial[] = [];
+        const phases: number[]              = [];
+        const drifts: number[]              = [];
+
+        for (let i = 0; i < count; i++) {
+          const tex = this._buildNoteTexture(symbols[i]);
+          const mat = new THREE.SpriteMaterial({
+            map: tex,
+            color: threeColor,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            sizeAttenuation: true,
+          });
+          const sprite = new THREE.Sprite(mat);
+          sprite.scale.set(noteScale, noteScale, noteScale);
+          sprite.position.copy(origin);
+          sprite.visible = false;
+          this._scene.add(sprite);
+          sprites.push(sprite);
+          spriteMats.push(mat);
+          phases.push(i / count);   // stagger so notes don't all start together
+          drifts.push((Math.random() - 0.5) * bbox * 0.07);
+        }
+
+        this._animParticleSystems.set(anim.id, {
+          type: 'music_notes', active: false,
+          origin, sprites, spriteMats, phases, drifts, noteScale, travelDist,
+        });
+
+      } else if (anim.type === 'ac_flow') {
+        // ---- AC flow: 12 line-segment streaks fanning out from anchor ----
+        const count  = 12;
+        const dir    = this._acFlowDir(anim.flow_direction);
+        const segLen = bbox * 0.14;   // streak length in world units
+        const spread = bbox * 0.09;   // cone radius at full extension
+
+        // Build two perpendicular axes for cone spread
+        const perpU = new THREE.Vector3();
+        const perpV = new THREE.Vector3();
+        const worldUp = new THREE.Vector3(0, 1, 0);
+        if (Math.abs(dir.dot(worldUp)) < 0.99) {
+          perpU.crossVectors(dir, worldUp).normalize();
+        } else {
+          perpU.set(1, 0, 0);
+        }
+        perpV.crossVectors(dir, perpU).normalize();
+
+        // Per-streak cone offsets (distributed evenly around the cone axis)
+        const cu = new Float32Array(count);
+        const cv = new Float32Array(count);
+        const cw = new Float32Array(count);
+        for (let i = 0; i < count; i++) {
+          const angle = (i / count) * Math.PI * 2;
+          const cos   = Math.cos(angle); const sin = Math.sin(angle);
+          cu[i] = (perpU.x * cos + perpV.x * sin) * spread;
+          cv[i] = (perpU.y * cos + perpV.y * sin) * spread;
+          cw[i] = (perpU.z * cos + perpV.z * sin) * spread;
+        }
+
+        // Build geometry (positions updated every frame in _animationLoop)
+        const positions = new Float32Array(count * 6);
+        for (let i = 0; i < count; i++) {
+          positions[i*6]   = origin.x; positions[i*6+1] = origin.y; positions[i*6+2] = origin.z;
+          positions[i*6+3] = origin.x + dir.x * segLen;
+          positions[i*6+4] = origin.y + dir.y * segLen;
+          positions[i*6+5] = origin.z + dir.z * segLen;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const mat = new THREE.LineBasicMaterial({
+          color: new THREE.Color().setStyle(anim.color_cool || '#4fc3f7'),
+          transparent: true, opacity: 0.78, depthWrite: false,
+        });
+        const mesh = new THREE.LineSegments(geom, mat);
+        mesh.frustumCulled = false;
+        mesh.visible = false;
+        this._scene.add(mesh);
+
+        const acPhases = new Float32Array(count);
+        for (let i = 0; i < count; i++) acPhases[i] = i / count; // stagger
+
+        this._animParticleSystems.set(anim.id, {
+          type: 'ac_flow', active: false,
+          origin, mesh, material: mat, dir, count, acPhases, segLen, cu, cv, cw,
+        });
+      }
+    }
+
+    this._startOrStopAnimationLoop();
   }
 
   /** Create a room animation overlay element (music notes or AC air flow). */
@@ -5274,47 +5540,73 @@ export class Floor3dCard extends LitElement {
       }
     }
 
-    // --- Room animations (music notes, AC flow) ---
+    // --- Room animations (music notes, AC flow) — 3D particle systems ---
     if (this._config.animations) {
+      let particleActiveChanged = false;
+
       for (const anim of this._config.animations) {
-        const el = this._animationElements.get(anim.id);
-        if (!el) continue;
+        // Legacy HTML-overlay types (none currently, but guard for future)
+        if (anim.type !== 'music_notes' && anim.type !== 'ac_flow') {
+          const el = this._animationElements.get(anim.id);
+          if (!el) continue;
+          const visible = anim.visible_when ? evaluateCondition(hass, anim.visible_when) : true;
+          el.style.display = visible ? 'block' : 'none';
+          continue;
+        }
 
-        let visible = true;
-        if (anim.visible_when) visible = evaluateCondition(hass, anim.visible_when);
+        const sys = this._animParticleSystems.get(anim.id);
+        if (!sys) continue;
 
+        const visibleWhen = anim.visible_when ? evaluateCondition(hass, anim.visible_when) : true;
         const entityState = hass.states[anim.entity];
-        if (!entityState) { el.style.display = 'none'; continue; }
+        if (!entityState) {
+          if (sys.active) { sys.active = false; particleActiveChanged = true; }
+          if (sys.sprites) sys.sprites.forEach(s => { s.visible = false; });
+          if (sys.mesh)    sys.mesh.visible = false;
+          continue;
+        }
+
+        let shouldBeActive = visibleWhen;
 
         if (anim.type === 'music_notes') {
-          const activeState = anim.active_state || 'playing';
-          el.style.display = (visible && entityState.state === activeState) ? 'block' : 'none';
+          const activeState  = anim.active_state || 'playing';
+          const volumeLevel  = Number(entityState.attributes?.volume_level ?? 1);
+          shouldBeActive = shouldBeActive
+            && entityState.state === activeState
+            && volumeLevel > 0;
 
         } else if (anim.type === 'ac_flow') {
-          const hvacMode   = entityState.attributes?.hvac_mode || entityState.state;
           const hvacAction = entityState.attributes?.hvac_action;
           const isActive   = entityState.state !== 'off'
                           && hvacAction !== 'idle'
                           && hvacAction !== 'off';
-          if (!visible || !isActive) {
-            el.style.display = 'none';
-          } else {
-            el.style.display = 'block';
-            // Pick snowflake color based on hvac_mode / hvac_action
-            let color: string;
+          shouldBeActive = shouldBeActive && isActive;
+
+          if (sys.material) {
+            // Live-update streak color based on hvac_mode / hvac_action
+            const hvacMode = entityState.attributes?.hvac_mode || entityState.state;
+            let colorStr: string;
             if (hvacMode === 'heat' || hvacAction === 'heating') {
-              color = el.dataset.acHeat || '#ff7043';
+              colorStr = anim.color_heat || '#ff7043';
             } else if (hvacMode === 'fan_only' || hvacAction === 'fan') {
-              color = el.dataset.acFan  || 'rgba(210,210,210,0.85)';
+              colorStr = anim.color_fan  || 'rgba(210,210,210,0.85)';
             } else {
-              color = el.dataset.acCool || '#4fc3f7';
+              colorStr = anim.color_cool || '#4fc3f7';
             }
-            el.querySelectorAll<HTMLElement>('.f3d-flake-icon').forEach(icon => {
-              icon.style.color = color;
-            });
+            (sys.material as THREE.LineBasicMaterial).color.setStyle(colorStr);
           }
         }
+
+        if (shouldBeActive !== sys.active) {
+          sys.active = shouldBeActive;
+          particleActiveChanged = true;
+        }
+
+        if (sys.sprites) sys.sprites.forEach(s => { s.visible = shouldBeActive; });
+        if (sys.mesh)    sys.mesh.visible = shouldBeActive;
       }
+
+      if (particleActiveChanged) this._startOrStopAnimationLoop();
     }
 
     // After updating visibility, sync overlay positions
