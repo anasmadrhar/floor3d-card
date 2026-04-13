@@ -90,6 +90,14 @@ export class Floor3dCard extends LitElement {
   private _animationsEnabled = true;
   private _renderPending = false;
   private _lastFrameTime = 0;
+  // Cache for anchor world-space positions.  Box3.setFromObject() traverses the
+  // entire sub-tree — caching eliminates per-frame traversal for every overlay element.
+  private _anchorWorldPosCache = new Map<string, THREE.Vector3>();
+  // Pre-allocated scratch Vector3 used by _projectToScreen to avoid per-call GC pressure.
+  private readonly _ndcScratch = new THREE.Vector3();
+  // Camera-position snapshots used to skip _updateOverlayPositions when nothing moved.
+  private _lastOverlayCamPos    = new THREE.Vector3();
+  private _lastOverlayCamTarget = new THREE.Vector3();
   private _controls?: OrbitControls;
   private _hemiLight?: THREE.HemisphereLight;
   private _modelX?: number;
@@ -2609,6 +2617,8 @@ export class Floor3dCard extends LitElement {
 
     if (this._content && this._renderer) {
       this._modelready = true;
+      // Anchor positions computed from the just-loaded model; clear any stale cache.
+      this._anchorWorldPosCache.clear();
       console.log('Show canvas');
       this._levelbar = document.createElement('div');
       this._zoombar = document.createElement('div');
@@ -4680,8 +4690,7 @@ export class Floor3dCard extends LitElement {
       }
 
       ws.mesh.geometry.attributes['position'].needsUpdate = true;
-      // Recompute bounding sphere so frustum culling doesn't hide moved particles
-      ws.mesh.geometry.computeBoundingSphere();
+      // frustumCulled = false on this mesh — no bounding sphere recomputation needed.
     }
 
     // --- Wind streak animation ---
@@ -4722,7 +4731,7 @@ export class Floor3dCard extends LitElement {
       }
 
       ws.mesh.geometry.attributes['position'].needsUpdate = true;
-      ws.mesh.geometry.computeBoundingSphere();
+      // frustumCulled = false on this mesh — no bounding sphere recomputation needed.
     }
 
     // --- Lightning flash ---
@@ -4797,13 +4806,19 @@ export class Floor3dCard extends LitElement {
             sys.phases[i] += dt * speed;
             if (sys.phases[i] > 1) sys.phases[i] -= 1;
 
-            const p      = sys.phases[i];
-            const op     = Math.sin(p * Math.PI);   // 0→1→0 fade
+            const p  = sys.phases[i];
+            const op = Math.sin(p * Math.PI);   // 0→1→0 fade
+
+            const sprite = sys.sprites[i];
+            // Avoid matrix recalculation + render cost when sprite is fully transparent.
+            if (op < 0.01) {
+              sprite.visible = false;
+              continue;
+            }
+            sprite.visible = true;
             const y      = origin.y + p * travelDist;
             const xDrift = sys.drifts![i] * Math.sin(p * Math.PI * 1.5);
             const scl    = noteScale * (0.55 + op * 0.55);
-
-            const sprite = sys.sprites[i];
             sprite.position.set(origin.x + xDrift, y, origin.z);
             sprite.scale.set(scl, scl, scl);
             sys.spriteMats[i].opacity = op * 0.92;
@@ -4835,7 +4850,7 @@ export class Floor3dCard extends LitElement {
           }
 
           sys.mesh.geometry.attributes['position'].needsUpdate = true;
-          sys.mesh.geometry.computeBoundingSphere();
+          // frustumCulled = false on this mesh — no bounding sphere recomputation needed.
         }
       }
     }
@@ -5468,7 +5483,8 @@ export class Floor3dCard extends LitElement {
   private _projectToScreen(worldPos: THREE.Vector3): { x: number; y: number; behind: boolean } {
     if (!this._camera || !this._content) return { x: 0, y: 0, behind: true };
 
-    const ndc = worldPos.clone().project(this._camera);
+    // Reuse scratch vector to avoid a new THREE.Vector3 allocation every call.
+    const ndc = this._ndcScratch.copy(worldPos).project(this._camera);
     const behind = ndc.z > 1;
     const x = ((ndc.x + 1) / 2) * this._content.clientWidth;
     const y = ((-ndc.y + 1) / 2) * this._content.clientHeight;
@@ -5480,6 +5496,10 @@ export class Floor3dCard extends LitElement {
    * by z_offset (in model units).
    */
   private _getAnchorWorldPos(objectId: string, zOffset = 0): THREE.Vector3 | null {
+    const cacheKey = zOffset === 0 ? objectId : `${objectId}:${zOffset}`;
+    const cached = this._anchorWorldPosCache.get(cacheKey);
+    if (cached) return cached;
+
     if (!this._scene) return null;
     const obj = this._scene.getObjectByName(objectId);
     if (!obj) return null;
@@ -5488,6 +5508,7 @@ export class Floor3dCard extends LitElement {
     const center = new THREE.Vector3();
     box.getCenter(center);
     if (zOffset !== 0) center.y += zOffset;
+    this._anchorWorldPosCache.set(cacheKey, center);
     return center;
   }
 
@@ -5497,6 +5518,23 @@ export class Floor3dCard extends LitElement {
    */
   private _updateOverlayPositions(): void {
     if (!this._markerOverlay || !this._camera) return;
+
+    // Skip expensive projection + DOM writes when the camera hasn't moved.
+    // Overlay positions are purely a function of camera pose — if the camera
+    // is static there is nothing to update.
+    const camPos    = this._camera.position;
+    const camTarget = this._controls?.target;
+    if (camTarget &&
+        camPos.x === this._lastOverlayCamPos.x &&
+        camPos.y === this._lastOverlayCamPos.y &&
+        camPos.z === this._lastOverlayCamPos.z &&
+        camTarget.x === this._lastOverlayCamTarget.x &&
+        camTarget.y === this._lastOverlayCamTarget.y &&
+        camTarget.z === this._lastOverlayCamTarget.z) {
+      return;
+    }
+    if (camTarget) this._lastOverlayCamTarget.copy(camTarget);
+    this._lastOverlayCamPos.copy(camPos);
 
     const GAP = 8; // px gap between stacked items sharing the same anchor
 
