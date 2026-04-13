@@ -1829,7 +1829,7 @@ export class Floor3dCard extends LitElement {
     const phase = this._computeMoonPhase(moonState);
     const tex   = this._buildMoonTexture(phase);
 
-    const r = (this._modelBboxDiagonal || 300) * 0.06;
+    const r = (this._modelBboxDiagonal || 300) * 0.055 * (this._config.moon_size ?? 1);
     const geo = new THREE.SphereGeometry(r, 32, 32);
     const mat = new THREE.MeshStandardMaterial({
       map: tex,
@@ -1856,10 +1856,12 @@ export class Floor3dCard extends LitElement {
       this._sunMesh = undefined;
     }
 
-    const r = (this._modelBboxDiagonal || 300) * 0.075;
+    const r = (this._modelBboxDiagonal || 300) * 0.035 * (this._config.sun_size ?? 1);
     const geo = new THREE.SphereGeometry(r, 32, 32);
     const mat = new THREE.MeshBasicMaterial({
-      color: 0xffdd44,
+      color: 0xffe680,
+      transparent: true,
+      opacity: 0.88,
       fog: false,
     });
     this._sunMesh = new THREE.Mesh(geo, mat);
@@ -1944,10 +1946,34 @@ export class Floor3dCard extends LitElement {
     const spread = Math.max(this._modelBboxDiagonal || 400, 400) * 1.5;
     const maxY   = Math.max(this._modelBboxDiagonal || 200, 200) * 0.8;
 
+    // Helper: create a Points mesh with frustum culling disabled
+    const makePoints = (
+      positions: Float32Array,
+      velocities: Float32Array,
+      tex: THREE.CanvasTexture,
+      sizePx: number,
+      opacity: number,
+      type: 'snow' | 'hail' | 'sand' | 'wind',
+    ) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      // sizeAttenuation:false = pixel size constant regardless of camera distance,
+      // so particles stay visible from any zoom level.
+      const mat = new THREE.PointsMaterial({
+        map: tex, size: sizePx, transparent: true, opacity,
+        depthWrite: false, sizeAttenuation: false,
+      });
+      const mesh = new THREE.Points(geo, mat);
+      mesh.name = '__f3d_weather';
+      mesh.frustumCulled = false; // never cull — positions change every frame
+      this._scene.add(mesh);
+      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type, segLen: 0 };
+    };
+
     // Rain / Pouring / Snowy-rainy: LineSegments (streak look)
     if (state === 'rainy' || state === 'lightning-rainy' || state === 'pouring' || state === 'snowy-rainy') {
-      const count  = state === 'pouring' ? 1200 : state === 'snowy-rainy' ? 400 : 700;
-      const segLen = state === 'pouring' ? 14 : 9;
+      const count  = state === 'pouring' ? 1500 : state === 'snowy-rainy' ? 500 : 900;
+      const segLen = state === 'pouring' ? 18 : 12;
       const col    = state === 'pouring' ? 0x8899cc : 0x99aadd;
 
       const positions = new Float32Array(count * 6);
@@ -1957,7 +1983,7 @@ export class Floor3dCard extends LitElement {
         const x = (Math.random() - 0.5) * spread * 2;
         const y = Math.random() * (maxY + segLen);
         const z = (Math.random() - 0.5) * spread * 2;
-        const v = 90 + Math.random() * 60;
+        const v = 150 + Math.random() * 100; // faster fall for visibility
         positions[i * 6]     = x;  positions[i * 6 + 1] = y + segLen;  positions[i * 6 + 2] = z;
         positions[i * 6 + 3] = x;  positions[i * 6 + 4] = y;           positions[i * 6 + 5] = z;
         velY[i] = v;
@@ -1966,10 +1992,11 @@ export class Floor3dCard extends LitElement {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       const mat = new THREE.LineBasicMaterial({
-        color: col, transparent: true, opacity: 0.45, depthWrite: false,
+        color: col, transparent: true, opacity: 0.65, depthWrite: false,
       });
       const mesh = new THREE.LineSegments(geo, mat);
       mesh.name = '__f3d_weather';
+      mesh.frustumCulled = false; // positions change every frame
       this._scene.add(mesh);
       this._weatherSystem = { mesh, velArray: velY, spread, maxY, type: 'rain', segLen };
 
@@ -1979,6 +2006,7 @@ export class Floor3dCard extends LitElement {
         this._scene.add(this._lightningLight);
         this._lightningTimer = Math.random() * 5;
       }
+      this._startOrStopAnimationLoop();
       return;
     }
 
@@ -1988,102 +2016,94 @@ export class Floor3dCard extends LitElement {
       this._lightningLight.position.set(0, maxY * 0.9, 0);
       this._scene.add(this._lightningLight);
       this._lightningTimer = Math.random() * 5;
+      this._startOrStopAnimationLoop();
       return;
     }
 
     // Snow
     if (state === 'snowy') {
-      const count = 600;
-      const tex   = this._makeDiscSprite('rgba(200,220,255,0.9)');
+      const count = 800;
+      const tex   = this._makeDiscSprite('rgba(220,235,255,0.95)');
       const positions  = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
       for (let i = 0; i < count; i++) {
         positions[i*3]   = (Math.random() - 0.5) * spread * 2;
         positions[i*3+1] = Math.random() * maxY;
         positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
-        velocities[i*3]   = (Math.random() - 0.5) * 4;
-        velocities[i*3+1] = -(8 + Math.random() * 8);
-        velocities[i*3+2] = (Math.random() - 0.5) * 4;
+        velocities[i*3]   = (Math.random() - 0.5) * 10;
+        velocities[i*3+1] = -(20 + Math.random() * 20); // faster fall
+        velocities[i*3+2] = (Math.random() - 0.5) * 10;
       }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      const mat = new THREE.PointsMaterial({ map: tex, size: 3, transparent: true, opacity: 0.8, depthWrite: false, sizeAttenuation: true });
-      const mesh = new THREE.Points(geo, mat);
-      mesh.name = '__f3d_weather';
-      this._scene.add(mesh);
-      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'snow', segLen: 0 };
+      makePoints(positions, velocities, tex, 14, 0.88, 'snow');
+      this._startOrStopAnimationLoop();
       return;
     }
 
     // Hail
     if (state === 'hail') {
-      const count = 350;
-      const tex   = this._makeDiscSprite('rgba(210,225,255,0.95)');
+      const count = 500;
+      const tex   = this._makeDiscSprite('rgba(210,225,255,0.98)');
       const positions  = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
       for (let i = 0; i < count; i++) {
         positions[i*3]   = (Math.random() - 0.5) * spread * 2;
         positions[i*3+1] = Math.random() * maxY;
         positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
-        velocities[i*3]   = (Math.random() - 0.5) * 6;
-        velocities[i*3+1] = -(60 + Math.random() * 40);
-        velocities[i*3+2] = (Math.random() - 0.5) * 6;
+        velocities[i*3]   = (Math.random() - 0.5) * 15;
+        velocities[i*3+1] = -(120 + Math.random() * 80); // fast hail
+        velocities[i*3+2] = (Math.random() - 0.5) * 15;
       }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      const mat = new THREE.PointsMaterial({ map: tex, size: 4, transparent: true, opacity: 0.9, depthWrite: false, sizeAttenuation: true });
-      const mesh = new THREE.Points(geo, mat);
-      mesh.name = '__f3d_weather';
-      this._scene.add(mesh);
-      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'hail', segLen: 0 };
+      makePoints(positions, velocities, tex, 10, 0.92, 'hail');
+      this._startOrStopAnimationLoop();
       return;
     }
 
-    // Sandstorm / dust
+    // Sandstorm / dust — keep low (below model top) so it doesn't bury the house
     if (state === 'sandstorm' || state === 'dust' || state === 'exceptional') {
-      const count = 1200;
-      const tex   = this._makeDiscSprite('rgba(200,155,70,0.75)');
+      const count = 800;
+      const tex   = this._makeDiscSprite('rgba(200,155,70,0.82)');
+      const sandMaxY = maxY * 0.45; // stay below roofline
       const positions  = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
       for (let i = 0; i < count; i++) {
         positions[i*3]   = (Math.random() - 0.5) * spread * 2;
-        positions[i*3+1] = Math.random() * maxY;
+        positions[i*3+1] = Math.random() * sandMaxY;
         positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
-        velocities[i*3]   = 60 + Math.random() * 50;
-        velocities[i*3+1] = (Math.random() - 0.5) * 8;
-        velocities[i*3+2] = (Math.random() - 0.5) * 15;
+        velocities[i*3]   = 80 + Math.random() * 60;
+        velocities[i*3+1] = (Math.random() - 0.5) * 10;
+        velocities[i*3+2] = (Math.random() - 0.5) * 20;
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      const mat = new THREE.PointsMaterial({ map: tex, size: 2.5, transparent: true, opacity: 0.65, depthWrite: false, sizeAttenuation: true });
+      const mat = new THREE.PointsMaterial({
+        map: tex, size: 8, transparent: true, opacity: 0.7,
+        depthWrite: false, sizeAttenuation: false,
+      });
       const mesh = new THREE.Points(geo, mat);
       mesh.name = '__f3d_weather';
+      mesh.frustumCulled = false;
       this._scene.add(mesh);
-      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'sand', segLen: 0 };
+      this._weatherSystem = { mesh, velArray: velocities, spread, maxY: sandMaxY, type: 'sand', segLen: 0 };
+      this._startOrStopAnimationLoop();
       return;
     }
 
     // Windy (debris)
     if (state === 'windy' || state === 'windy-variant') {
-      const count = 250;
-      const tex   = this._makeDiscSprite('rgba(140,180,90,0.8)');
+      const count = 350;
+      const tex   = this._makeDiscSprite('rgba(140,180,90,0.85)');
       const positions  = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
       for (let i = 0; i < count; i++) {
         positions[i*3]   = (Math.random() - 0.5) * spread * 2;
-        positions[i*3+1] = Math.random() * maxY * 0.6;
+        positions[i*3+1] = Math.random() * maxY * 0.5;
         positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
-        velocities[i*3]   = 30 + Math.random() * 25;
-        velocities[i*3+1] = (Math.random() - 0.5) * 6;
-        velocities[i*3+2] = (Math.random() - 0.5) * 10;
+        velocities[i*3]   = 50 + Math.random() * 40;
+        velocities[i*3+1] = (Math.random() - 0.5) * 12;
+        velocities[i*3+2] = (Math.random() - 0.5) * 18;
       }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      const mat = new THREE.PointsMaterial({ map: tex, size: 5, transparent: true, opacity: 0.7, depthWrite: false, sizeAttenuation: true });
-      const mesh = new THREE.Points(geo, mat);
-      mesh.name = '__f3d_weather';
-      this._scene.add(mesh);
-      this._weatherSystem = { mesh, velArray: velocities, spread, maxY, type: 'wind', segLen: 0 };
+      makePoints(positions, velocities, tex, 12, 0.75, 'wind');
+      this._startOrStopAnimationLoop();
     }
     // Clear/cloudy/fog/partlycloudy: sky uniforms handle visuals; no particles needed.
   }
@@ -4086,8 +4106,11 @@ export class Floor3dCard extends LitElement {
   }
 
   private _needsAnimationLoop() {
-    // Check rotations and Tween.getAll()
-    return this._rotation_state.some((item) => item !== 0) || TWEEN.getAll().length > 0;
+    // Check rotations, Tween, and active weather / lightning
+    return this._rotation_state.some((item) => item !== 0) ||
+           TWEEN.getAll().length > 0 ||
+           !!this._weatherSystem ||
+           !!this._lightningLight;
   }
 
   // If every rotating entity and Tween is stopped, disable animation
@@ -4095,16 +4118,17 @@ export class Floor3dCard extends LitElement {
     if (this._needsAnimationLoop()) {
       if (this._to_animate) return;
       this._to_animate = true;
-      this._clock = new THREE.Clock();
+      if (!this._clock) this._clock = new THREE.Clock();
       this._renderer.setAnimationLoop(() => this._animationLoop());
     } else {
       this._to_animate = false;
-      this._clock = null;
+      // Do NOT null the clock — weather particles need it if they start later
       this._renderer.setAnimationLoop(null);
     }
   }
 
   private _animationLoop() {
+    if (!this._clock) this._clock = new THREE.Clock();
     const clockDelta = this._clock.getDelta();
     let rotateBy = clockDelta * Math.PI * 2;
 
@@ -4180,6 +4204,8 @@ export class Floor3dCard extends LitElement {
       }
 
       ws.mesh.geometry.attributes['position'].needsUpdate = true;
+      // Recompute bounding sphere so frustum culling doesn't hide moved particles
+      ws.mesh.geometry.computeBoundingSphere();
     }
 
     // --- Lightning flash ---
