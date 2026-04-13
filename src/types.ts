@@ -289,6 +289,10 @@ export interface Floor3dCardConfig {
   // Defaults to 1.5× the model's bounding-box diagonal if omitted.
   sun_distance?: number;
   moon_distance?: number;
+
+  // Size multiplier for the sun/moon spheres (default 1.0). Use < 1 to shrink, > 1 to enlarge.
+  sun_size?: number;
+  moon_size?: number;
 }
 
 export interface EntityFloor3dCardConfig {

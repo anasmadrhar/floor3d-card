@@ -1829,7 +1829,7 @@ export class Floor3dCard extends LitElement {
     const phase = this._computeMoonPhase(moonState);
     const tex   = this._buildMoonTexture(phase);
 
-    const r = (this._modelBboxDiagonal || 300) * 0.06;
+    const r = (this._modelBboxDiagonal || 300) * 0.055 * (this._config.moon_size ?? 1);
     const geo = new THREE.SphereGeometry(r, 32, 32);
     const mat = new THREE.MeshStandardMaterial({
       map: tex,
@@ -1856,10 +1856,12 @@ export class Floor3dCard extends LitElement {
       this._sunMesh = undefined;
     }
 
-    const r = (this._modelBboxDiagonal || 300) * 0.075;
+    const r = (this._modelBboxDiagonal || 300) * 0.035 * (this._config.sun_size ?? 1);
     const geo = new THREE.SphereGeometry(r, 32, 32);
     const mat = new THREE.MeshBasicMaterial({
-      color: 0xffdd44,
+      color: 0xffe680,
+      transparent: true,
+      opacity: 0.88,
       fog: false,
     });
     this._sunMesh = new THREE.Mesh(geo, mat);
