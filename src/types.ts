@@ -131,6 +131,8 @@ export interface AnimationConfig {
   color_cool?: string;              // icon color when cooling (default: sky blue)
   color_heat?: string;              // icon color when heating (default: orange)
   color_fan?: string;               // icon color when fan-only (default: light gray)
+  // ac_flow direction: 'down' (default, ceiling unit), 'up', 'north', 'south', 'east', 'west'
+  flow_direction?: string;
 }
 
 // ---------------------------------------------------------------------------
