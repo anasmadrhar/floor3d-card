@@ -192,6 +192,11 @@ export class Floor3dCard extends LitElement {
     spread: number;                // bounding half-width for spawn/wrap
     maxY: number;
   };
+  private _cloudSystem?: {         // active 3D cloud puff system
+    group: THREE.Group;
+    clouds: { mesh: THREE.Group; vel: THREE.Vector3 }[];
+    spread: number;                // radial boundary for wrap-around
+  };
 
   // --- Marker / room-control / animation overlay system ---
   private _markerOverlay?: HTMLDivElement;
@@ -1510,6 +1515,7 @@ export class Floor3dCard extends LitElement {
             if (ws?.state !== pws?.state) {
               this._updateWeatherSky(ws.state);
               this._createWeatherParticles(ws.state);
+              this._initClouds(ws.state);
             }
             if (ws) {
               const newSpd = Number(ws.attributes?.['wind_speed']   ?? 0);
@@ -1556,6 +1562,7 @@ export class Floor3dCard extends LitElement {
           if (ws?.state !== pws?.state) {
             this._updateWeatherSky(ws.state);
             this._createWeatherParticles(ws.state);
+            this._initClouds(ws.state);
           }
           if (ws) {
             const newSpd = Number(ws.attributes?.['wind_speed']   ?? 0);
@@ -1954,6 +1961,136 @@ export class Floor3dCard extends LitElement {
     this._windSystem.mesh.geometry.dispose();
     (this._windSystem.mesh.material as THREE.Material).dispose();
     this._windSystem = undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3D Cloud puff system
+  // ---------------------------------------------------------------------------
+
+  /** Number of cloud puffs to show for a given HA weather state. */
+  private _cloudCountForState(state: string): number {
+    const map: Record<string, number> = {
+      'sunny': 0, 'clear-night': 0,
+      'partlycloudy': 3,
+      'cloudy': 6,
+      'fog': 5,
+      'rainy': 5,   'lightning-rainy': 7, 'pouring': 8,
+      'snowy': 5,   'snowy-rainy': 6,     'hail': 6,
+      'lightning': 7,
+      'windy': 2,   'windy-variant': 2,
+      'sandstorm': 4, 'dust': 4, 'exceptional': 4,
+    };
+    return map[state] ?? 4;
+  }
+
+  /**
+   * Build a single cartoony cloud from overlapping semi-transparent spheres.
+   * @param baseRadius - radius of the central sphere in world units
+   * @param tint - THREE hex color for the sphere material
+   */
+  private _makeCloud(baseRadius: number, tint: number): THREE.Group {
+    const group = new THREE.Group();
+    const add = (r: number, x: number, y: number, z: number, op: number) => {
+      const geo = new THREE.SphereGeometry(r, 8, 6);
+      const mat = new THREE.MeshBasicMaterial({
+        color: tint, transparent: true, opacity: op, fog: false, depthWrite: false,
+      });
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      group.add(m);
+    };
+    const r = baseRadius;
+    add(r,          0,       0,        0,    0.92); // centre
+    add(r * 0.72,   r * 0.9, 0,        0,    0.87); // right
+    add(r * 0.72,  -r * 0.9, 0,        0,    0.87); // left
+    add(r * 0.62,   r * 0.4, r * 0.55, 0,    0.83); // top-right bump
+    add(r * 0.58,  -r * 0.3, r * 0.60, 0,    0.80); // top-left bump
+    return group;
+  }
+
+  /** Remove all cloud puffs from the scene and free GPU resources. */
+  private _removeClouds(): void {
+    if (!this._cloudSystem) return;
+    this._scene?.remove(this._cloudSystem.group);
+    this._cloudSystem.group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    });
+    this._cloudSystem = undefined;
+  }
+
+  /**
+   * Build or rebuild the cloud puff system for the given weather state.
+   * Clouds drift slowly in the wind direction and loop around the scene.
+   * Called on model-ready init and whenever weather_entity state changes.
+   */
+  private _initClouds(weatherState: string): void {
+    this._removeClouds();
+    const count = this._cloudCountForState(weatherState);
+    if (count === 0 || !this._scene) return;
+
+    const bbox   = this._modelBboxDiagonal || 300;
+    const height = this._config.cloud_distance ?? bbox * 0.9;
+    const spread = bbox * 1.5;
+    const baseR  = bbox * 0.1 * (this._config.cloud_size ?? 1.0);
+
+    // Sandy/dusty weather → warm beige tint
+    const isSandy = ['sandstorm', 'dust', 'exceptional'].includes(weatherState);
+    const tint    = isSandy ? 0xd4b896 : 0xffffff;
+
+    // Drift direction from weather entity wind_bearing (falls back to gentle westerly)
+    const weatherAttrs = this._config.weather_entity
+      ? this._hass?.states[this._config.weather_entity]?.attributes : null;
+    const windBearing = Number(weatherAttrs?.['wind_bearing'] ?? 270);
+    const windSpeedKmh = Number(weatherAttrs?.['wind_speed'] ?? 15);
+
+    // Meteorological bearing → TO direction vector (same maths as _updateWindStreaks)
+    let northX = 0, northZ = 1;
+    if (this._config.north) {
+      const n = new THREE.Vector3(
+        this._config.north.x ?? 0, 0, this._config.north.z ?? 1,
+      ).normalize();
+      northX = n.x; northZ = n.z;
+    }
+    const eastX = northZ, eastZ = -northX;
+    const bRad  = THREE.MathUtils.degToRad(windBearing);
+    const driftDX = -(Math.sin(bRad) * eastX + Math.cos(bRad) * northX);
+    const driftDZ = -(Math.sin(bRad) * eastZ + Math.cos(bRad) * northZ);
+
+    // Cloud drift speed: 30–70 % of wind speed in world-units/s, capped 5–22 u/s
+    const baseSpeed = Math.min(Math.max(windSpeedKmh * 0.5, 5), 22);
+
+    const group  = new THREE.Group();
+    group.name   = '__f3d_clouds';
+    const clouds: { mesh: THREE.Group; vel: THREE.Vector3 }[] = [];
+
+    for (let ci = 0; ci < count; ci++) {
+      const scale = 0.60 + Math.random() * 0.75;
+      const cloud = this._makeCloud(baseR * scale, tint);
+
+      // Scatter in a disc at the configured height
+      const angle  = (ci / count) * Math.PI * 2 + (Math.random() - 0.5) * 1.5;
+      const radius = spread * (0.15 + Math.random() * 0.85);
+      cloud.position.set(
+        Math.cos(angle) * radius,
+        height + (Math.random() - 0.5) * baseR * 1.5,
+        Math.sin(angle) * radius,
+      );
+      cloud.rotation.y = Math.random() * Math.PI * 2;
+
+      // Per-cloud speed variation so they don't march in lockstep
+      const spd = baseSpeed * (0.55 + Math.random() * 0.9);
+      const vel = new THREE.Vector3(driftDX * spd, 0, driftDZ * spd);
+
+      group.add(cloud);
+      clouds.push({ mesh: cloud, vel });
+    }
+
+    this._scene.add(group);
+    this._cloudSystem = { group, clouds, spread: spread * 1.3 };
+    this._startOrStopAnimationLoop();
   }
 
   /** Remove active weather particles and lightning light from the scene. */
@@ -4273,12 +4410,13 @@ export class Floor3dCard extends LitElement {
   }
 
   private _needsAnimationLoop() {
-    // Check rotations, Tween, and active weather / lightning / wind
+    // Check rotations, Tween, and active weather / lightning / wind / clouds
     return this._rotation_state.some((item) => item !== 0) ||
            TWEEN.getAll().length > 0 ||
            !!this._weatherSystem ||
            !!this._lightningLight ||
-           !!this._windSystem;
+           !!this._windSystem ||
+           !!this._cloudSystem;
   }
 
   // If every rotating entity and Tween is stopped, disable animation
@@ -4447,6 +4585,26 @@ export class Floor3dCard extends LitElement {
           this._lightningLight.intensity = 0;
           this._lightningTimer = 4 + Math.random() * 6;
           this._lightningPhase = 0;
+        }
+      }
+    }
+
+    // --- Cloud puff drift ---
+    if (this._cloudSystem) {
+      const cs = this._cloudSystem;
+      const dt = clockDelta;
+      for (const c of cs.clouds) {
+        c.mesh.position.x += c.vel.x * dt;
+        c.mesh.position.z += c.vel.z * dt;
+        // Wrap: when a cloud drifts past the spread radius, loop it back
+        const d2 = c.mesh.position.x * c.mesh.position.x + c.mesh.position.z * c.mesh.position.z;
+        if (d2 > cs.spread * cs.spread) {
+          // Teleport to the opposite side with a bit of jitter
+          const backAngle = Math.atan2(c.mesh.position.z, c.mesh.position.x) + Math.PI;
+          const r = cs.spread * (0.25 + Math.random() * 0.45);
+          const jitter = (Math.random() - 0.5) * 0.7;
+          c.mesh.position.x = Math.cos(backAngle + jitter) * r;
+          c.mesh.position.z = Math.sin(backAngle + jitter) * r;
         }
       }
     }
@@ -4650,6 +4808,7 @@ export class Floor3dCard extends LitElement {
       if (ws) {
         this._updateWeatherSky(ws.state);
         this._createWeatherParticles(ws.state);
+        this._initClouds(ws.state);
         this._updateWindStreaks(
           Number(ws.attributes?.['wind_speed']   ?? 0),
           Number(ws.attributes?.['wind_bearing'] ?? 270),

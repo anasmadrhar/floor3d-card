@@ -293,6 +293,13 @@ export interface Floor3dCardConfig {
   // Size multiplier for the sun/moon spheres (default 1.0). Use < 1 to shrink, > 1 to enlarge.
   sun_size?: number;
   moon_size?: number;
+
+  // --- 3D cloud puffs (driven by weather_entity state) ---
+  // Height of clouds above the scene bounding-box centre (world units).
+  // Defaults to 0.9× the model bounding-box diagonal.
+  cloud_distance?: number;
+  // Size multiplier for cloud sphere clusters (default 1.0).
+  cloud_size?: number;
 }
 
 export interface EntityFloor3dCardConfig {
