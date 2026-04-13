@@ -84,8 +84,9 @@ lock_camera: 'no'
 | `path` | string | **required** | URL path to the folder holding model files |
 | `objfile` | string | **required** | Model filename (`.glb` or `.obj`) |
 | `mtlfile` | string | — | Material file (`.obj` models only) |
-| `height` | number | `400` | Card height in pixels |
+| `height` | number or string | `400` | Card height — pixels (`500`) or any CSS value (`"100vh"`, `"50%"`, `"calc(100vh - 60px)"`) |
 | `backgroundColor` | string | `#aaaaaa` | Canvas background: hex color, color name, or `transparent` |
+| `backdrop_filter` | string | — | CSS `backdrop-filter` applied to the card (e.g. `"blur(10px) saturate(180%)"`); requires `backgroundColor` to be semi-transparent |
 | `globalLightPower` | number/string | `0.5` | Ambient light intensity (0–1) or a numeric sensor entity ID |
 | `header` | `yes`/`no` | `yes` | Show the card title bar |
 | `shadow` | `yes`/`no` | `no` | Enable light shadows (impacts performance) |
@@ -715,18 +716,113 @@ visible_when:
 
 ---
 
-## Sky and Sun
+## Sky, Sun, Moon & Weather
 
-Render a realistic sky, ground, and sun position based on `sun.sun`.
+### Enabling the sky
+
+Set `sky: 'yes'` to activate the atmospheric sky shader (THREE.js Sky). A realistic atmosphere, directional sunlight, and optional ground plane are added to the scene. The sun position is read from the `sun.sun` entity and updates live as it changes throughout the day.
+
+```yaml
+sky: 'yes'
+north:             # optional — which axis points north in your model
+  x: -1
+  z: 0
+```
+
+> **Tip:** Add a flat transparent slab object in SweetHome3D named `transparent_slab*` to prevent sunlight from shining through the ceiling.
+
+### Sky options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `sky` | `yes`/`no` | `no` | Enable the atmospheric sky |
+| `north` | object | `{x:0, z:1}` | North direction in model space (X-Z plane) — aligns sun/moon with real cardinal directions |
+| `sky_distance` | number | `100000` | Radius of the sky dome in world units; reduce for a "closer horizon" feel |
+| `sky_background` | `yes`/`no` | `yes` | `no` removes the atmosphere mesh so the background is transparent (sun/moon/weather still work) |
+| `ground` | string | warm yellow | Ground plane appearance: `none` removes it, `transparent` keeps it invisible (for shadow reception), or any CSS color (`'#2d4a1e'`) |
+
+### Sun sphere
+
+When `sky: 'yes'`, a visible 3D sun sphere is added to the scene and follows the real solar elevation/azimuth live.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `sun_distance` | number | auto | Distance of the sun sphere from scene center (world units); defaults to 1.5× bounding-box diagonal |
+| `sun_size` | number | `1.0` | Size multiplier for the sun sphere — `< 1` shrinks, `> 1` enlarges |
+
+### Moon with lunar phase
+
+When `sky: 'yes'` and the sun is below the horizon (`sun.sun` state = `below_horizon`), a moon sphere automatically appears at the antipodal position in the sky. Its texture shows the correct lunar phase (waxing/waning crescent, quarter, gibbous, full, new).
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `show_moon` | `yes`/`no` | `yes` | Show/hide the moon sphere at night |
+| `moon_distance` | number | auto | Distance of the moon sphere from scene center (world units) |
+| `moon_size` | number | `1.0` | Size multiplier for the moon sphere |
+| `moon_entity` | string | — | Optional HA moon phase sensor (e.g. `sensor.moon`) whose state is the phase name (`full_moon`, `waxing_crescent`, etc.) — overrides the built-in calculation |
+
+**Supported `moon_entity` state values:** `new_moon`, `waxing_crescent`, `first_quarter`, `waxing_gibbous`, `full_moon`, `waning_gibbous`, `last_quarter`, `waning_crescent`.
+
+### Weather-driven sky & particle effects
+
+Point `weather_entity` at a HA `weather.*` entity to have the sky dynamically adapt to current conditions. Sky turbidity and fog automatically update, and 3D particle systems create rain, snow, hail, wind, or sandstorm effects in the scene.
+
+```yaml
+sky: 'yes'
+weather_entity: weather.home
+weather_precipitation: 'yes'   # set 'no' to disable 3D particles (sky still adapts)
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `weather_entity` | string | — | HA weather entity ID |
+| `weather_precipitation` | `yes`/`no` | `yes` | Enable 3D particle weather effects |
+
+#### How weather states map to effects
+
+| HA state | Sky change | 3D particle effect |
+|---|---|---|
+| `sunny` / `clear-night` | Bright blue sky, no fog | — |
+| `partlycloudy` | Slightly hazier | — |
+| `cloudy` | High turbidity + light fog | — |
+| `fog` | Very high turbidity + dense fog | — |
+| `rainy` | Hazy + light fog | Rain streaks (900 drops) |
+| `lightning-rainy` | Hazy + fog | Rain streaks + lightning flash |
+| `pouring` | Very hazy + medium fog | Heavy rain streaks (1500 drops) |
+| `snowy` | Hazy + light fog | Snowflakes (800 particles) |
+| `snowy-rainy` | Hazy + fog | Snowflakes (800 particles) |
+| `hail` | Overcast + fog | Hailstones (500 particles) |
+| `lightning` | Overcast + fog | Lightning flash |
+| `windy` / `windy-variant` | Clear | Wind debris (350 particles) |
+| `sandstorm` / `dust` / `exceptional` | Amber, very dense fog | Sand particles below roofline (800 particles) |
+
+### Full sky example
 
 ```yaml
 sky: 'yes'
 north:
   x: -1
   z: 0
+weather_entity: weather.home
+weather_precipitation: 'yes'
+show_moon: 'yes'
+moon_entity: sensor.moon          # optional
+sun_distance: 3000
+sun_size: 1.2
+moon_distance: 3000
+moon_size: 1.0
+sky_distance: 100000
+ground: '#2d4a1e'                 # dark green grass
 ```
 
-Add a transparent slab object in SweetHome3D named `transparent_slab*` to prevent sunlight from shining through the ceiling.
+### Backdrop blur / glass card effect
+
+Apply a CSS `backdrop-filter` to create a frosted-glass look. Use a semi-transparent `backgroundColor` so the blurred content behind the card is visible.
+
+```yaml
+backgroundColor: 'rgba(0,0,0,0.35)'
+backdrop_filter: 'blur(12px) saturate(180%)'
+```
 
 ---
 
@@ -737,7 +833,7 @@ type: custom:floor3d-card
 name: Home
 path: /local/my_home/
 objfile: home.glb
-height: 550
+height: 550                        # or: height: "100vh"
 backgroundColor: '#cccccc'
 globalLightPower: '0.7'
 header: 'yes'
@@ -745,6 +841,19 @@ shadow: 'no'
 lock_camera: 'no'
 hide_zoom_areas_ui: 'no'
 zoom_entity: input_select.floor3d_zoom
+
+# Sky & weather
+sky: 'yes'
+north:
+  x: -1
+  z: 0
+weather_entity: weather.home
+weather_precipitation: 'yes'
+show_moon: 'yes'
+sun_distance: 3000
+sun_size: 1.2
+moon_distance: 3000
+ground: '#2d4a1e'
 
 camera_position:
   x: 609.3
@@ -830,6 +939,6 @@ entities:
 ## Credits
 
 Original card by [adizanni](https://github.com/adizanni/floor3d-card).  
-Room-aware smart home features (markers, room controls, animations, zoom entity, diagonal AC wind) added by [anasmadrhar](https://github.com/anasmadrhar).
+Room-aware smart home features (markers, room controls, animations, zoom entity, diagonal AC wind, sky/weather/moon system, backdrop blur, CSS height, particle weather effects) added by [anasmadrhar](https://github.com/anasmadrhar).
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/AndyHA)
