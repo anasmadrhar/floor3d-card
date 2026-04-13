@@ -327,6 +327,10 @@ export interface Floor3dCardConfig {
   // The card only needs 60fps if you have fast-moving animations; 30fps is
   // imperceptible for typical home-automation visualisations.
   target_fps?: number;
+  // Scale factor for the number of 3D weather and wind particles (default 1.0).
+  // Values < 1 reduce particle count proportionally (e.g. 0.5 = half the particles).
+  // Values > 1 increase density. Useful if CPU is still high with weather enabled.
+  particle_density?: number;
 }
 
 export interface EntityFloor3dCardConfig {
