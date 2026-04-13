@@ -182,6 +182,16 @@ export class Floor3dCard extends LitElement {
   private _lightningLight?: THREE.PointLight;
   private _lightningTimer = 0;
   private _lightningPhase = 0;
+  private _windSystem?: {          // active 3D wind streak system (independent of weather state)
+    mesh: THREE.LineSegments;
+    count: number;
+    windDir: THREE.Vector3;        // normalized direction wind blows TO
+    baseSpeed: number;             // base world units per second
+    speeds: Float32Array;          // per-streak speed multiplier (0.7–1.3×)
+    segLengths: Float32Array;      // per-streak length in world units
+    spread: number;                // bounding half-width for spawn/wrap
+    maxY: number;
+  };
 
   // --- Marker / room-control / animation overlay system ---
   private _markerOverlay?: HTMLDivElement;
@@ -1493,13 +1503,22 @@ export class Floor3dCard extends LitElement {
             }
           }
 
-          // Weather entity: update sky + particles when state changes
+          // Weather entity: update sky + particles when state changes; wind streaks on speed/bearing change
           if (this._config.weather_entity) {
             const ws  = hass.states[this._config.weather_entity];
             const pws = prevHass?.states[this._config.weather_entity];
             if (ws?.state !== pws?.state) {
               this._updateWeatherSky(ws.state);
               this._createWeatherParticles(ws.state);
+            }
+            if (ws) {
+              const newSpd = Number(ws.attributes?.['wind_speed']   ?? 0);
+              const newBrg = Number(ws.attributes?.['wind_bearing'] ?? 270);
+              const oldSpd = Number(pws?.attributes?.['wind_speed']   ?? 0);
+              const oldBrg = Number(pws?.attributes?.['wind_bearing'] ?? 270);
+              if (newSpd !== oldSpd || newBrg !== oldBrg || (newSpd > 18) !== (oldSpd > 18)) {
+                this._updateWindStreaks(newSpd, newBrg);
+              }
             }
           }
 
@@ -1537,6 +1556,15 @@ export class Floor3dCard extends LitElement {
           if (ws?.state !== pws?.state) {
             this._updateWeatherSky(ws.state);
             this._createWeatherParticles(ws.state);
+          }
+          if (ws) {
+            const newSpd = Number(ws.attributes?.['wind_speed']   ?? 0);
+            const newBrg = Number(ws.attributes?.['wind_bearing'] ?? 270);
+            const oldSpd = Number(pws?.attributes?.['wind_speed']   ?? 0);
+            const oldBrg = Number(pws?.attributes?.['wind_bearing'] ?? 270);
+            if (newSpd !== oldSpd || newBrg !== oldBrg || (newSpd > 18) !== (oldSpd > 18)) {
+              this._updateWindStreaks(newSpd, newBrg);
+            }
           }
         }
 
@@ -1919,6 +1947,15 @@ export class Floor3dCard extends LitElement {
     return new THREE.CanvasTexture(canvas);
   }
 
+  /** Remove active wind streak system from the scene. */
+  private _removeWindSystem(): void {
+    if (!this._windSystem) return;
+    this._scene?.remove(this._windSystem.mesh);
+    this._windSystem.mesh.geometry.dispose();
+    (this._windSystem.mesh.material as THREE.Material).dispose();
+    this._windSystem = undefined;
+  }
+
   /** Remove active weather particles and lightning light from the scene. */
   private _removeWeatherParticles(): void {
     if (this._weatherSystem) {
@@ -2088,24 +2125,90 @@ export class Floor3dCard extends LitElement {
       return;
     }
 
-    // Windy (debris)
-    if (state === 'windy' || state === 'windy-variant') {
-      const count = 350;
-      const tex   = this._makeDiscSprite('rgba(140,180,90,0.85)');
-      const positions  = new Float32Array(count * 3);
-      const velocities = new Float32Array(count * 3);
-      for (let i = 0; i < count; i++) {
-        positions[i*3]   = (Math.random() - 0.5) * spread * 2;
-        positions[i*3+1] = Math.random() * maxY * 0.5;
-        positions[i*3+2] = (Math.random() - 0.5) * spread * 2;
-        velocities[i*3]   = 50 + Math.random() * 40;
-        velocities[i*3+1] = (Math.random() - 0.5) * 12;
-        velocities[i*3+2] = (Math.random() - 0.5) * 18;
-      }
-      makePoints(positions, velocities, tex, 12, 0.75, 'wind');
-      this._startOrStopAnimationLoop();
+    // 'windy'/'windy-variant': wind streaks handled by _updateWindStreaks() (speed-based, not state-based).
+    // Clear/cloudy/fog/partlycloudy/windy: sky uniforms handle visuals; no particles needed.
+  }
+
+  /**
+   * Build or rebuild the wind streak system from the weather entity's wind_speed and wind_bearing
+   * attributes. Shows horizontal line streaks in the wind direction whenever wind_speed > 18 km/h,
+   * regardless of the overall weather state (can coexist with rain, snow, etc.).
+   */
+  private _updateWindStreaks(windSpeed: number, bearing: number): void {
+    this._removeWindSystem();
+    if (windSpeed <= 18 || !this._scene || this._config.weather_precipitation === 'no') return;
+
+    // Compute north/east basis vectors from config
+    let northX = 0, northZ = 1;
+    if (this._config.north) {
+      const n = new THREE.Vector3(
+        this._config.north.x ?? 0, 0, this._config.north.z ?? 1,
+      ).normalize();
+      northX = n.x; northZ = n.z;
     }
-    // Clear/cloudy/fog/partlycloudy: sky uniforms handle visuals; no particles needed.
+    // east = rotate north 90° CW around Y: east = (northZ, 0, -northX)
+    const eastX = northZ;
+    const eastZ = -northX;
+
+    // Meteorological bearing = direction FROM which wind blows
+    // Wind blows TO = -(FROM direction)
+    const bRad   = THREE.MathUtils.degToRad(bearing);
+    const wdx    = -(Math.sin(bRad) * eastX + Math.cos(bRad) * northX);
+    const wdz    = -(Math.sin(bRad) * eastZ + Math.cos(bRad) * northZ);
+    const windDir = new THREE.Vector3(wdx, 0, wdz).normalize();
+
+    const spread = Math.max(this._modelBboxDiagonal || 400, 400) * 1.5;
+    const maxY   = Math.max(this._modelBboxDiagonal || 200, 200) * 0.5;
+
+    // Speed: world units/s proportional to km/h
+    const baseSpeed = windSpeed * 12; // 20 km/h → 240 u/s, 60 km/h → 720 u/s
+
+    // Count: proportional to wind speed, capped
+    const count = Math.min(Math.floor(windSpeed * 8), 400);
+
+    const positions  = new Float32Array(count * 6);
+    const speeds     = new Float32Array(count);
+    const segLengths = new Float32Array(count);
+
+    // Perpendicular (across-wind) direction in XZ plane
+    const perpX = -windDir.z;
+    const perpZ =  windDir.x;
+
+    for (let i = 0; i < count; i++) {
+      // Random position: along wind and across wind
+      const along  = (Math.random() - 0.5) * spread * 2;
+      const across = (Math.random() - 0.5) * spread * 2;
+      const sx = windDir.x * along + perpX * across;
+      const sy = Math.random() * maxY;
+      const sz = windDir.z * along + perpZ * across;
+
+      // Streak length proportional to wind speed, with randomness
+      const slen = windSpeed * 2.5 * (0.4 + Math.random() * 1.4);
+      // Per-streak speed variation so they don't all move in lockstep
+      const spd  = 0.7 + Math.random() * 0.6;
+
+      segLengths[i] = slen;
+      speeds[i]     = spd;
+
+      // Start = tail, end = head (downwind from start)
+      positions[i*6]   = sx;             positions[i*6+1] = sy; positions[i*6+2] = sz;
+      positions[i*6+3] = sx + windDir.x * slen; positions[i*6+4] = sy; positions[i*6+5] = sz + windDir.z * slen;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    // Light blue streaks, like wind icon colors
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xaaddff, transparent: true, opacity: Math.min(0.3 + windSpeed * 0.01, 0.65),
+      depthWrite: false,
+    });
+    const mesh = new THREE.LineSegments(geo, mat);
+    mesh.name = '__f3d_wind';
+    mesh.frustumCulled = false;
+    this._scene.add(mesh);
+
+    this._windSystem = { mesh, count, windDir, baseSpeed, speeds, segLengths, spread, maxY };
+    this._startOrStopAnimationLoop();
   }
 
   private _initTorch(): void {
@@ -4106,11 +4209,12 @@ export class Floor3dCard extends LitElement {
   }
 
   private _needsAnimationLoop() {
-    // Check rotations, Tween, and active weather / lightning
+    // Check rotations, Tween, and active weather / lightning / wind
     return this._rotation_state.some((item) => item !== 0) ||
            TWEEN.getAll().length > 0 ||
            !!this._weatherSystem ||
-           !!this._lightningLight;
+           !!this._lightningLight ||
+           !!this._windSystem;
   }
 
   // If every rotating entity and Tween is stopped, disable animation
@@ -4205,6 +4309,47 @@ export class Floor3dCard extends LitElement {
 
       ws.mesh.geometry.attributes['position'].needsUpdate = true;
       // Recompute bounding sphere so frustum culling doesn't hide moved particles
+      ws.mesh.geometry.computeBoundingSphere();
+    }
+
+    // --- Wind streak animation ---
+    if (this._windSystem) {
+      const ws  = this._windSystem;
+      const pos = ws.mesh.geometry.attributes['position'].array as Float32Array;
+      const dt  = clockDelta;
+      // Across-wind perpendicular direction (for wrapping respawn)
+      const perpX = -ws.windDir.z;
+      const perpZ =  ws.windDir.x;
+
+      for (let i = 0; i < ws.count; i++) {
+        const v  = ws.baseSpeed * ws.speeds[i] * dt;
+        const dx = ws.windDir.x * v;
+        const dz = ws.windDir.z * v;
+
+        // Move start (tail) point
+        pos[i*6]   += dx;
+        pos[i*6+2] += dz;
+
+        // Wrap: check if head has passed the downwind boundary
+        const projHead = (pos[i*6] + ws.windDir.x * ws.segLengths[i]) * ws.windDir.x
+                       + (pos[i*6+2] + ws.windDir.z * ws.segLengths[i]) * ws.windDir.z;
+        if (projHead > ws.spread) {
+          // Teleport tail to the upwind side, random lateral offset
+          const newAlong  = -(ws.spread * (0.5 + Math.random() * 0.5));
+          const newAcross = (Math.random() - 0.5) * ws.spread * 2;
+          pos[i*6]   = ws.windDir.x * newAlong + perpX * newAcross;
+          pos[i*6+1] = Math.random() * ws.maxY;
+          pos[i*6+2] = ws.windDir.z * newAlong + perpZ * newAcross;
+        }
+
+        // Recompute head from current tail position
+        const slen = ws.segLengths[i];
+        pos[i*6+3] = pos[i*6]   + ws.windDir.x * slen;
+        pos[i*6+4] = pos[i*6+1]; // horizontal streak — same Y
+        pos[i*6+5] = pos[i*6+2] + ws.windDir.z * slen;
+      }
+
+      ws.mesh.geometry.attributes['position'].needsUpdate = true;
       ws.mesh.geometry.computeBoundingSphere();
     }
 
@@ -4441,6 +4586,10 @@ export class Floor3dCard extends LitElement {
       if (ws) {
         this._updateWeatherSky(ws.state);
         this._createWeatherParticles(ws.state);
+        this._updateWindStreaks(
+          Number(ws.attributes?.['wind_speed']   ?? 0),
+          Number(ws.attributes?.['wind_bearing'] ?? 270),
+        );
       }
     }
 

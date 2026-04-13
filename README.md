@@ -793,8 +793,21 @@ weather_precipitation: 'yes'   # set 'no' to disable 3D particles (sky still ada
 | `snowy-rainy` | Hazy + fog | Snowflakes (800 particles) |
 | `hail` | Overcast + fog | Hailstones (500 particles) |
 | `lightning` | Overcast + fog | Lightning flash |
-| `windy` / `windy-variant` | Clear | Wind debris (350 particles) |
+| `windy` / `windy-variant` | Clear | Wind streaks (speed-proportional, see below) |
 | `sandstorm` / `dust` / `exceptional` | Amber, very dense fog | Sand particles below roofline (800 particles) |
+
+#### Wind streaks (independent of weather state)
+
+Wind streaks appear **automatically whenever `wind_speed > 18 km/h`**, regardless of the overall weather state (e.g., you can have rain + wind at the same time). They are oriented along `wind_bearing` and their speed, count, and opacity scale with wind speed.
+
+| `wind_speed` (km/h) | Effect |
+|---|---|
+| ≤ 18 | No streaks |
+| 19–30 | Light streaks (soft blue-white lines) |
+| 30–60 | Moderate to heavy streaks |
+| > 60 | Dense, fast-moving streaks |
+
+The `wind_bearing` attribute (meteorological convention — direction **from** which wind blows) automatically rotates the streak direction to match actual wind direction. `north` config is respected.
 
 ### Full sky example
 
