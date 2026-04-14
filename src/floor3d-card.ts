@@ -2010,9 +2010,7 @@ export class Floor3dCard extends LitElement {
     grad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size, size);
-    const discTex = new THREE.CanvasTexture(canvas);
-    discTex.colorSpace = THREE.SRGBColorSpace;
-    return discTex;
+    return new THREE.CanvasTexture(canvas);
   }
 
   /** Remove active wind streak system from the scene. */
@@ -2467,6 +2465,12 @@ export class Floor3dCard extends LitElement {
   protected async display3dmodel(): Promise<void> {
     //load the model into the GL Renderer
 
+    // Disable r152+ default ColorManagement and restore r130 light pipeline.
+    // Existing light intensity values were authored for r130's non-physical mode
+    // (physicallyCorrectLights = false). r170 makes physical lights the only mode,
+    // but disabling ColorManagement keeps the color/brightness pipeline compatible.
+    THREE.ColorManagement.enabled = false;
+
     console.log('Start Build Renderer');
     this._modelready = false;
 
@@ -2523,7 +2527,10 @@ export class Floor3dCard extends LitElement {
 
     this._applyBackground();
 
-    this._renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Match r130: linear output by default, sRGB only when sky shader is active.
+    this._renderer.outputColorSpace = (this._config.sky === 'yes')
+      ? THREE.SRGBColorSpace
+      : THREE.LinearSRGBColorSpace;
     this._renderer.toneMapping = THREE.LinearToneMapping;
     //this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this._renderer.toneMappingExposure = 0.6;
@@ -4164,7 +4171,6 @@ export class Floor3dCard extends LitElement {
 
     if (_foundobject instanceof THREE.Mesh) {
       const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
       texture.repeat.set(1, 1);
 
       if (fileExt == 'glb') {
@@ -4188,7 +4194,6 @@ export class Floor3dCard extends LitElement {
     // put the canvas texture with the text on top of the Sprite object: consider merge with the applyTextCanvas
 
     const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
     texture.repeat.set(1, 1);
 
     if (object.material.name.startsWith('f3dmat')) {
@@ -5290,9 +5295,7 @@ export class Floor3dCard extends LitElement {
     ctx.shadowColor = 'rgba(0,0,0,0.4)';
     ctx.shadowBlur = 6;
     ctx.fillText(symbol, size / 2, size * 0.54);
-    const noteTex = new THREE.CanvasTexture(canvas);
-    noteTex.colorSpace = THREE.SRGBColorSpace;
-    return noteTex;
+    return new THREE.CanvasTexture(canvas);
   }
 
   /**
