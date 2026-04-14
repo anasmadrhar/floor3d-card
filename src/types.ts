@@ -331,6 +331,11 @@ export interface Floor3dCardConfig {
   // Values < 1 reduce particle count proportionally (e.g. 0.5 = half the particles).
   // Values > 1 increase density. Useful if CPU is still high with weather enabled.
   particle_density?: number;
+
+  // --- Renderer selection ---
+  // 'yes' enables the WebGPU renderer on supported devices (Chrome 121+, Android with Vulkan).
+  // Falls back to WebGLRenderer automatically if WebGPU is unavailable or init fails.
+  webgpu?: string;
 }
 
 export interface EntityFloor3dCardConfig {

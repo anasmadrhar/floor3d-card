@@ -157,7 +157,7 @@ export class Floor3dCard extends LitElement {
   private _longpressTimeout: any;
   private _mouseupEventListener: EventListener;
   private _currentIntersections: THREE.Intersection[];
-  private _changeListener: EventListener;
+  private _changeListener: (...args: any[]) => void;
   private _cardObscured: boolean;
   private _card?: HTMLElement;
   private _content?: HTMLElement;
@@ -1899,7 +1899,9 @@ export class Floor3dCard extends LitElement {
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
 
-    return new THREE.CanvasTexture(canvas);
+    const moonTex = new THREE.CanvasTexture(canvas);
+    moonTex.colorSpace = THREE.SRGBColorSpace;
+    return moonTex;
   }
 
   /** Initialise the 3D moon mesh with phase texture. Called from _initSky(). */
@@ -2008,7 +2010,9 @@ export class Floor3dCard extends LitElement {
     grad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size, size);
-    return new THREE.CanvasTexture(canvas);
+    const discTex = new THREE.CanvasTexture(canvas);
+    discTex.colorSpace = THREE.SRGBColorSpace;
+    return discTex;
   }
 
   /** Remove active wind streak system from the scene. */
@@ -2460,7 +2464,7 @@ export class Floor3dCard extends LitElement {
     this._scene.add(this._ambient_light);
   }
 
-  protected display3dmodel(): void {
+  protected async display3dmodel(): Promise<void> {
     //load the model into the GL Renderer
 
     console.log('Start Build Renderer');
@@ -2474,7 +2478,25 @@ export class Floor3dCard extends LitElement {
 
     // create and initialize renderer
 
-    this._renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true, alpha: true });
+    // WebGPU opt-in: use WebGPURenderer when configured and supported, else WebGLRenderer.
+    const useWebGPU = this._config.webgpu === 'yes' && typeof navigator !== 'undefined' && !!(navigator as any).gpu;
+
+    if (useWebGPU) {
+      try {
+        // Dynamic import keeps WebGPU bundle out of WebGL-only builds.
+        // @ts-ignore — three/webgpu is not in @types/three's node-resolution paths
+        const { WebGPURenderer } = await import('three/webgpu');
+        const gpuRenderer = new WebGPURenderer({ antialias: true, alpha: true });
+        await gpuRenderer.init();
+        this._renderer = gpuRenderer as unknown as THREE.WebGLRenderer;
+        console.info('floor3d-card: WebGPU renderer active');
+      } catch (e) {
+        console.warn('floor3d-card: WebGPU init failed, falling back to WebGL', e);
+        this._renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true, alpha: true });
+      }
+    } else {
+      this._renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true, alpha: true });
+    }
 
     // Handle WebGL context loss (e.g. Android backgrounding reclaims GPU).
     this._renderer.domElement.addEventListener('webglcontextlost', (e) => {
@@ -2488,7 +2510,8 @@ export class Floor3dCard extends LitElement {
       this.display3dmodel();
     }, false);
 
-    this._maxtextureimage = this._renderer.capabilities.maxTextures;
+    // WebGPU renderer doesn't expose capabilities.maxTextures; default to 16.
+    this._maxtextureimage = (this._renderer as any).capabilities?.maxTextures ?? 16;
     console.log('Max Texture Image Units: ' + this._maxtextureimage);
     console.log('Max Texture Image Units: number of lights casting shadow should be less than the above number');
 
@@ -2500,15 +2523,11 @@ export class Floor3dCard extends LitElement {
 
     this._applyBackground();
 
-    //this._renderer.physicallyCorrectLights = true;
-    if (this._config.sky && this._config.sky == 'yes') {
-      this._renderer.outputEncoding = THREE.sRGBEncoding;
-    }
+    this._renderer.outputColorSpace = THREE.SRGBColorSpace;
     this._renderer.toneMapping = THREE.LinearToneMapping;
     //this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this._renderer.toneMappingExposure = 0.6;
     this._renderer.localClippingEnabled = true;
-    this._renderer.physicallyCorrectLights = false;
 
     if (this._config.path && this._config.path != '') {
       let path = this._config.path;
@@ -2531,8 +2550,8 @@ export class Floor3dCard extends LitElement {
             this._config.mtlfile,
             this._onLoaded3DMaterials.bind(this),
             this._onLoadMaterialProgress.bind(this),
-            function (error: ErrorEvent): void {
-              throw new Error(error.error);
+            function (error: unknown): void {
+              throw new Error(String(error));
             },
           );
         } else {
@@ -2541,8 +2560,8 @@ export class Floor3dCard extends LitElement {
             path + this._config.objfile,
             this._onLoaded3DModel.bind(this),
             this._onLoadObjectProgress.bind(this),
-            function (error: ErrorEvent): void {
-              throw new Error(error.error);
+            function (error: unknown): void {
+              throw new Error(String(error));
             },
           );
         }
@@ -2554,8 +2573,8 @@ export class Floor3dCard extends LitElement {
           this._config.objfile,
           this._onLoadedGLTF3DModel.bind(this),
           this._onloadedGLTF3DProgress.bind(this),
-          function (error: ErrorEvent): void {
-            throw new Error(error.error);
+          function (error: unknown): void {
+            throw new Error(String(error));
           },
         );
         this._modeltype = ModelSource.GLB;
@@ -3381,8 +3400,8 @@ export class Floor3dCard extends LitElement {
       path + this._config.objfile,
       this._onLoaded3DModel.bind(this),
       this._onLoadObjectProgress.bind(this),
-      function (error: ErrorEvent): void {
-        throw new Error(error.error);
+      function (error: unknown): void {
+        throw new Error(String(error));
       },
     );
     console.log('Material loaded end');
@@ -3686,7 +3705,7 @@ export class Floor3dCard extends LitElement {
                     const box: THREE.Box3 = new THREE.Box3();
                     box.setFromObject(_foundobject);
 
-                    let light = new THREE.Light();
+                    let light!: THREE.Light;
 
                     let x: number, y: number, z: number;
 
@@ -3972,7 +3991,7 @@ export class Floor3dCard extends LitElement {
           newRoomBox.expandByVector(expansion);
 
           const dimensions = new THREE.Vector3().subVectors(newRoomBox.max, newRoomBox.min);
-          const newRoomGeometry: THREE.BoxBufferGeometry = new THREE.BoxBufferGeometry(
+          const newRoomGeometry: THREE.BoxGeometry = new THREE.BoxGeometry(
             dimensions.x - 4,
             dimensions.y - 4,
             dimensions.z - 4,
@@ -4145,6 +4164,7 @@ export class Floor3dCard extends LitElement {
 
     if (_foundobject instanceof THREE.Mesh) {
       const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
       texture.repeat.set(1, 1);
 
       if (fileExt == 'glb') {
@@ -4168,6 +4188,7 @@ export class Floor3dCard extends LitElement {
     // put the canvas texture with the text on top of the Sprite object: consider merge with the applyTextCanvas
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.repeat.set(1, 1);
 
     if (object.material.name.startsWith('f3dmat')) {
@@ -5269,7 +5290,9 @@ export class Floor3dCard extends LitElement {
     ctx.shadowColor = 'rgba(0,0,0,0.4)';
     ctx.shadowBlur = 6;
     ctx.fillText(symbol, size / 2, size * 0.54);
-    return new THREE.CanvasTexture(canvas);
+    const noteTex = new THREE.CanvasTexture(canvas);
+    noteTex.colorSpace = THREE.SRGBColorSpace;
+    return noteTex;
   }
 
   /**
