@@ -3742,6 +3742,12 @@ export class Floor3dCard extends LitElement {
                     } else {
                       decay = 2;
                     }
+                    // In r130 (physicallyCorrectLights=false), decay controlled the softness
+                    // of a LINEAR falloff curve. In r170 physical mode the same value drives
+                    // an INVERSE-SQUARE falloff (1/d^decay), making lights ~10,000× dimmer at
+                    // typical model scales. Force decay=0 (constant, no falloff) to restore
+                    // the r130 "illuminates the full room" appearance.
+                    decay = 0;
 
                     if (entity.light.distance) {
                       distance = Number(entity.light.distance);
