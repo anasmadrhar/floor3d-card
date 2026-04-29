@@ -310,7 +310,11 @@ export class Floor3dCard extends LitElement {
       if (gl && gl.isContextLost()) {
         console.log('floor3d-card: WebGL context lost on visibility restore, reloading');
         this.display3dmodel();
-      } else if (!this._to_animate) {
+      } else {
+        // Resize first — window/viewport may have changed while tab was hidden.
+        this._resizeCanvas();
+        // Always repaint even if the animation loop is running; the drawing buffer
+        // can be cleared when the tab/window is backgrounded without a context-loss event.
         this._render();
       }
     };
@@ -335,9 +339,8 @@ export class Floor3dCard extends LitElement {
     window.addEventListener('floor3d-set-zoom', this._externalZoomHandler);
 
     if (this._modelready) {
-      if (this._ispanel() || this._issidebar()) {
-        this._resizeObserver.observe(this._card);
-      }
+      // Always observe — cards in a responsive grid also need resize handling.
+      this._resizeObserver.observe(this._card);
       this._zIndexInterval = window.setInterval(() => {
         this._zIndexChecker();
       }, 250);
@@ -352,9 +355,9 @@ export class Floor3dCard extends LitElement {
         this._render();
       }
 
-      if (this._ispanel() || this._issidebar()) {
-        this._resizeCanvas();
-      }
+      // Always resize on reconnect — the container may have a different size
+      // when switching between dashboards.
+      this._resizeCanvas();
     }
   }
 
@@ -799,9 +802,7 @@ export class Floor3dCard extends LitElement {
 
           // Re-establish per-instance observers/timers.
           this._resizeObserver = new ResizeObserver(() => this._resizeCanvasDebounce());
-          if (this._ispanel() || this._issidebar()) {
-            this._resizeObserver.observe(this._card);
-          }
+          this._resizeObserver.observe(this._card); // always observe, not just panel/sidebar
           this._zIndexInterval = window.setInterval(() => this._zIndexChecker(), 250);
 
           if (this._to_animate) {
@@ -1221,18 +1222,18 @@ export class Floor3dCard extends LitElement {
   private _resizeCanvas(): void {
     console.log('Resize canvas start');
     if (!this._renderer?.domElement?.parentElement) return;
+    const parentW = this._renderer.domElement.parentElement.clientWidth;
+    const parentH = this._renderer.domElement.parentElement.clientHeight;
+    if (parentW === 0 || parentH === 0) return; // layout not ready yet
+    // Compare CSS pixel dimensions (clientWidth/clientHeight) not physical pixels
+    // (domElement.width/height which are scaled by DPR and are never equal to CSS pixels).
     if (
-      this._renderer.domElement.parentElement.clientWidth !== this._renderer.domElement.width ||
-      this._renderer.domElement.parentElement.clientHeight !== this._renderer.domElement.height
+      parentW !== this._renderer.domElement.clientWidth ||
+      parentH !== this._renderer.domElement.clientHeight
     ) {
-      this._camera.aspect =
-        this._renderer.domElement.parentElement.clientWidth / this._renderer.domElement.parentElement.clientHeight;
+      this._camera.aspect = parentW / parentH;
       this._camera.updateProjectionMatrix();
-      this._renderer.setSize(
-        this._renderer.domElement.parentElement.clientWidth,
-        this._renderer.domElement.parentElement.clientHeight,
-        !this._issidebar(),
-      );
+      this._renderer.setSize(parentW, parentH, !this._issidebar());
       this._renderer.render(this._scene, this._camera);
     }
     console.log('Resize canvas end');
@@ -2740,6 +2741,15 @@ export class Floor3dCard extends LitElement {
 
       this._resizeCanvas();
 
+      // Schedule a second resize after the current frame — clientWidth can be 0
+      // if the browser hasn't finished layout when the async model callback fires
+      // (e.g. switching between dashboards with different card sizes).
+      requestAnimationFrame(() => {
+        if (!this._renderer || !this._modelready) return;
+        this._resizeCanvas();
+        if (!this._to_animate) this._render();
+      });
+
       /*
       this._zoom.forEach(element => {
 
@@ -2753,9 +2763,8 @@ export class Floor3dCard extends LitElement {
         this._zIndexChecker();
       }, 250);
 
-      if (this._ispanel() || this._issidebar()) {
-        this._resizeObserver.observe(this._card);
-      }
+      // Always observe — cards in a responsive grid also need resize handling.
+      this._resizeObserver.observe(this._card);
     }
   }
 
