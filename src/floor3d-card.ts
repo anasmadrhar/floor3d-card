@@ -1225,12 +1225,14 @@ export class Floor3dCard extends LitElement {
     const parentW = this._renderer.domElement.parentElement.clientWidth;
     const parentH = this._renderer.domElement.parentElement.clientHeight;
     if (parentW === 0 || parentH === 0) return; // layout not ready yet
-    // Compare CSS pixel dimensions (clientWidth/clientHeight) not physical pixels
-    // (domElement.width/height which are scaled by DPR and are never equal to CSS pixels).
-    if (
-      parentW !== this._renderer.domElement.clientWidth ||
-      parentH !== this._renderer.domElement.clientHeight
-    ) {
+    // Compare against the renderer's last-set logical size (CSS pixels).
+    // domElement.clientWidth is always equal to parentElement.clientWidth because
+    // the canvas style is set to width:100%/height:100%, so that comparison is
+    // always false. domElement.width/height are physical pixels (CSS × DPR) and
+    // likewise never equal parentW. renderer.getSize() is the ground truth.
+    const rendSize = new THREE.Vector2();
+    this._renderer.getSize(rendSize);
+    if (parentW !== rendSize.x || parentH !== rendSize.y) {
       this._camera.aspect = parentW / parentH;
       this._camera.updateProjectionMatrix();
       this._renderer.setSize(parentW, parentH, !this._issidebar());
