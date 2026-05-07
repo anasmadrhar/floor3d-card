@@ -21,6 +21,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader';
 import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { Sky } from 'three/examples/jsm/objects/Sky';
 import { Object3D } from 'three';
 import '../elements/button';
@@ -2579,6 +2580,7 @@ export class Floor3dCard extends LitElement {
       } else if (fileExt == 'glb') {
         //glb format
         const loader = new GLTFLoader().setPath(path);
+        loader.setMeshoptDecoder(MeshoptDecoder);
         loader.load(
           this._config.objfile,
           this._onLoadedGLTF3DModel.bind(this),
