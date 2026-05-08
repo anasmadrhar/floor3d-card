@@ -1149,33 +1149,31 @@ export class Floor3dCard extends LitElement {
   }
 
   private _zIndexChecker(): void {
-    let centerX = (this._card.getBoundingClientRect().left + this._card.getBoundingClientRect().right) / 2;
-    let centerY = (this._card.getBoundingClientRect().top + this._card.getBoundingClientRect().bottom) / 2;
-    let topElement = this._haShadowRoot.elementFromPoint(centerX, centerY);
+    const rect = this._card.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
 
-    if (topElement != null) {
-      let topZIndex = this._getZIndex(topElement.shadowRoot.firstElementChild);
-      let myZIndex = this._getZIndex(this._card);
+    const centerX = (rect.left + rect.right) / 2;
+    const centerY = (rect.top + rect.bottom) / 2;
 
-      if (myZIndex != topZIndex) {
-        if (!this._cardObscured) {
-          this._cardObscured = true;
+    // document.elementFromPoint returns the topmost element in the regular
+    // (light) DOM at that point. If it's this card or a descendant, nothing
+    // is covering it. If it's something else (HA dialog, overlay), we're obscured.
+    const topEl = document.elementFromPoint(centerX, centerY);
+    // topEl === this means the card itself is the topmost element (shadow host),
+    // which is not obscured. this.contains() returns false for `this` itself.
+    const obscured = topEl !== null && topEl !== this && !this.contains(topEl);
 
-          if (this._to_animate) {
-            console.log('Canvas Obscured; stopping animation');
-            this._clock = null;
-            this._renderer.setAnimationLoop(null);
-          }
-        }
-      } else {
-        if (this._cardObscured) {
-          this._cardObscured = false;
-
-          if (this._to_animate) {
-            console.log('Canvas visible again; starting animation');
-            this._clock = new THREE.Clock();
-            this._renderer.setAnimationLoop(() => this._animationLoop());
-          }
+    if (obscured !== this._cardObscured) {
+      this._cardObscured = obscured;
+      if (this._to_animate) {
+        if (obscured) {
+          console.log('Canvas Obscured; stopping animation');
+          this._clock = null;
+          this._renderer.setAnimationLoop(null);
+        } else {
+          console.log('Canvas visible again; starting animation');
+          this._clock = new THREE.Clock();
+          this._renderer.setAnimationLoop(() => this._animationLoop());
         }
       }
     }
