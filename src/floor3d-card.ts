@@ -51,7 +51,7 @@ class ModelSource {
 const CACHE_SKIP = new Set([
   'renderRoot', 'shadowRoot', 'isConnected',
   // new element's DOM references
-  '_card', '_card_id', '_resizeObserver', '_zIndexInterval',
+  '_card', '_card_id', '_resizeObserver', '_intersectionObserver',
   // event-listener closures bound to the old element
   '_performActionListener', '_mousedownEventListener',
   '_mouseupEventListener', '_changeListener',
@@ -151,7 +151,7 @@ export class Floor3dCard extends LitElement {
   private _firstcall?: boolean;
   private _resizeTimeout?: number;
   private _resizeObserver: ResizeObserver;
-  private _zIndexInterval: number;
+  private _intersectionObserver: IntersectionObserver;
   private _performActionListener: EventListener;
   private _clickStart?: number;
   private _mousedownEventListener: EventListener;
@@ -262,6 +262,26 @@ export class Floor3dCard extends LitElement {
     this._resizeObserver = new ResizeObserver(() => {
       this._resizeCanvasDebounce();
     });
+    // Stop/start animation based on whether the card is actually in the
+    // viewport (ratio === 0 means fully off-screen). Sibling cards that
+    // visually overlap do NOT reduce intersection ratio, so they no longer
+    // trigger false "Canvas Obscured" stops.
+    this._intersectionObserver = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      const nowObscured = entry.intersectionRatio === 0;
+      if (nowObscured !== this._cardObscured) {
+        this._cardObscured = nowObscured;
+        if (this._to_animate && this._renderer) {
+          if (nowObscured) {
+            this._clock = null;
+            this._renderer.setAnimationLoop(null);
+          } else {
+            this._clock = new THREE.Clock();
+            this._renderer.setAnimationLoop(() => this._animationLoop());
+          }
+        }
+      }
+    }, { threshold: 0 });
     this._performActionListener = (evt) => {
       this._performAction(evt);
     };
@@ -342,9 +362,7 @@ export class Floor3dCard extends LitElement {
     if (this._modelready) {
       // Always observe — cards in a responsive grid also need resize handling.
       this._resizeObserver.observe(this._card);
-      this._zIndexInterval = window.setInterval(() => {
-        this._zIndexChecker();
-      }, 250);
+      this._intersectionObserver.observe(this);
 
       if (this._to_animate) {
         this._clock = new THREE.Clock();
@@ -377,7 +395,7 @@ export class Floor3dCard extends LitElement {
     this._markerJourneyTimeouts.clear();
 
     this._resizeObserver.disconnect();
-    window.clearInterval(this._zIndexInterval);
+    this._intersectionObserver.unobserve(this);
 
     if (this._modelready && this._renderer) {
       // Keep the loaded model alive for a potential immediate re-creation
@@ -623,7 +641,7 @@ export class Floor3dCard extends LitElement {
 
     this._renderer.setAnimationLoop(null);
     this._resizeObserver.disconnect();
-    window.clearInterval(this._zIndexInterval);
+    this._intersectionObserver.unobserve(this);
 
     this._renderer.domElement.remove();
     this._renderer = null;
@@ -804,7 +822,7 @@ export class Floor3dCard extends LitElement {
           // Re-establish per-instance observers/timers.
           this._resizeObserver = new ResizeObserver(() => this._resizeCanvasDebounce());
           this._resizeObserver.observe(this._card); // always observe, not just panel/sidebar
-          this._zIndexInterval = window.setInterval(() => this._zIndexChecker(), 250);
+          this._intersectionObserver.observe(this);
 
           if (this._to_animate) {
             this._clock = new THREE.Clock();
@@ -1146,37 +1164,6 @@ export class Floor3dCard extends LitElement {
   private _performAction(e: any): void {
     const intersects = this._getintersect(e);
     this._defaultaction(intersects);
-  }
-
-  private _zIndexChecker(): void {
-    const rect = this._card.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-
-    const centerX = (rect.left + rect.right) / 2;
-    const centerY = (rect.top + rect.bottom) / 2;
-
-    // document.elementFromPoint returns the topmost element in the regular
-    // (light) DOM at that point. If it's this card or a descendant, nothing
-    // is covering it. If it's something else (HA dialog, overlay), we're obscured.
-    const topEl = document.elementFromPoint(centerX, centerY);
-    // topEl === this means the card itself is the topmost element (shadow host),
-    // which is not obscured. this.contains() returns false for `this` itself.
-    const obscured = topEl !== null && topEl !== this && !this.contains(topEl);
-
-    if (obscured !== this._cardObscured) {
-      this._cardObscured = obscured;
-      if (this._to_animate) {
-        if (obscured) {
-          console.log('Canvas Obscured; stopping animation');
-          this._clock = null;
-          this._renderer.setAnimationLoop(null);
-        } else {
-          console.log('Canvas visible again; starting animation');
-          this._clock = new THREE.Clock();
-          this._renderer.setAnimationLoop(() => this._animationLoop());
-        }
-      }
-    }
   }
 
   private _getZIndex(toCheck: any): string {
@@ -2761,9 +2748,7 @@ export class Floor3dCard extends LitElement {
       });
       */
 
-      this._zIndexInterval = window.setInterval(() => {
-        this._zIndexChecker();
-      }, 250);
+      this._intersectionObserver.observe(this);
 
       // Always observe — cards in a responsive grid also need resize handling.
       this._resizeObserver.observe(this._card);
