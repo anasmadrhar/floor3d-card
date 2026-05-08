@@ -5823,7 +5823,10 @@ export class Floor3dCard extends LitElement {
           const state = entityState ? entityState.state : null;
           const inner = el.querySelector('div') as HTMLElement;
           if (inner) {
-            const isOn = state === 'on' || state === 'playing' || state === 'open';
+            // "off" states — anything not in this set is considered active/on.
+            // Handles climate (heat/cool/fan_only/auto), covers, locks, alarms, etc.
+            const INACTIVE = new Set(['off', 'unavailable', 'unknown', 'idle', 'standby', 'closed', 'locked', 'disarmed']);
+            const isOn = state !== null && !INACTIVE.has(state);
             const icon = inner.querySelector('ha-icon') as HTMLElement;
             if (icon) {
               icon.style.color = isOn
