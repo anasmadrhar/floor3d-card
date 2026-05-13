@@ -271,13 +271,21 @@ export class Floor3dCard extends LitElement {
       const nowObscured = entry.intersectionRatio === 0;
       if (nowObscured !== this._cardObscured) {
         this._cardObscured = nowObscured;
-        if (this._to_animate && this._renderer) {
+        if (this._renderer) {
           if (nowObscured) {
-            this._clock = null;
-            this._renderer.setAnimationLoop(null);
+            // Card fully scrolled off-screen — pause the loop.
+            // Also clear _to_animate so _startOrStopAnimationLoop can restart
+            // cleanly when the card comes back into view.
+            if (this._to_animate) {
+              this._to_animate = false;
+              this._clock = null;
+              this._renderer.setAnimationLoop(null);
+            }
           } else {
-            this._clock = new THREE.Clock();
-            this._renderer.setAnimationLoop(() => this._animationLoop());
+            // Card is visible again — delegate to _startOrStopAnimationLoop so
+            // all flags (_animationsEnabled, _weatherAnimationsEnabled, etc.) are
+            // respected instead of unconditionally restarting the loop.
+            this._startOrStopAnimationLoop();
           }
         }
       }
@@ -4643,10 +4651,14 @@ export class Floor3dCard extends LitElement {
     const weatherRunning = this._weatherAnimationsEnabled && (
       !!this._weatherSystem || !!this._lightningLight || !!this._windSystem || !!this._cloudSystem
     );
+    // Mirror the weather guard: don't drive the loop for particles when the
+    // animations toggle is off, even if sys.active is somehow still true.
+    const particlesRunning = this._animationsEnabled &&
+      [...this._animParticleSystems.values()].some(s => s.active);
     return this._rotation_state.some((item) => item !== 0) ||
            TWEEN.getAll().length > 0 ||
            weatherRunning ||
-           [...this._animParticleSystems.values()].some(s => s.active);
+           particlesRunning;
   }
 
   // If every rotating entity and Tween is stopped, disable animation
