@@ -271,13 +271,21 @@ export class Floor3dCard extends LitElement {
       const nowObscured = entry.intersectionRatio === 0;
       if (nowObscured !== this._cardObscured) {
         this._cardObscured = nowObscured;
-        if (this._to_animate && this._renderer) {
+        if (this._renderer) {
           if (nowObscured) {
-            this._clock = null;
-            this._renderer.setAnimationLoop(null);
+            // Card fully scrolled off-screen — pause the loop.
+            // Also clear _to_animate so _startOrStopAnimationLoop can restart
+            // cleanly when the card comes back into view.
+            if (this._to_animate) {
+              this._to_animate = false;
+              this._clock = null;
+              this._renderer.setAnimationLoop(null);
+            }
           } else {
-            this._clock = new THREE.Clock();
-            this._renderer.setAnimationLoop(() => this._animationLoop());
+            // Card is visible again — delegate to _startOrStopAnimationLoop so
+            // all flags (_animationsEnabled, _weatherAnimationsEnabled, etc.) are
+            // respected instead of unconditionally restarting the loop.
+            this._startOrStopAnimationLoop();
           }
         }
       }
@@ -4643,10 +4651,14 @@ export class Floor3dCard extends LitElement {
     const weatherRunning = this._weatherAnimationsEnabled && (
       !!this._weatherSystem || !!this._lightningLight || !!this._windSystem || !!this._cloudSystem
     );
+    // Mirror the weather guard: don't drive the loop for particles when the
+    // animations toggle is off, even if sys.active is somehow still true.
+    const particlesRunning = this._animationsEnabled &&
+      [...this._animParticleSystems.values()].some(s => s.active);
     return this._rotation_state.some((item) => item !== 0) ||
            TWEEN.getAll().length > 0 ||
            weatherRunning ||
-           [...this._animParticleSystems.values()].some(s => s.active);
+           particlesRunning;
   }
 
   // If every rotating entity and Tween is stopped, disable animation
@@ -5104,6 +5116,12 @@ export class Floor3dCard extends LitElement {
         85%  { opacity: 1; transform: translateY(-44px) rotate(120deg) scale(1.05); }
         100% { opacity: 0; transform: translateY(-58px) rotate(180deg) scale(0.9); }
       }
+      @keyframes f3d-zzz {
+        0%   { opacity: 0; transform: translate(0, 0)    scale(0.7); }
+        20%  { opacity: 1; }
+        80%  { opacity: 0.9; }
+        100% { opacity: 0; transform: translate(6px, -18px) scale(1.1); }
+      }
     `;
     this._markerOverlay.appendChild(style);
 
@@ -5208,6 +5226,38 @@ export class Floor3dCard extends LitElement {
     // Tooltip
     if (marker.label) {
       wrapper.title = marker.label;
+    }
+
+    // Sleep / Zzz overlay — three staggered Z characters that float upward.
+    // Hidden by default; shown by _updateMarkersAndControls when sleep_entity is active.
+    if (marker.sleep_entity) {
+      const size = marker.size || 48;
+      const zzz = document.createElement('div');
+      zzz.dataset.zzzOverlay = 'true';
+      zzz.style.cssText =
+        'position:absolute;top:0;right:0;display:none;pointer-events:none;overflow:visible;';
+      // Three Z spans with staggered size, position, and animation delay.
+      const zDefs = [
+        { fontSize: 9,  x: 4,   y: -2,  delay: '0s' },
+        { fontSize: 11, x: 10,  y: -9,  delay: '0.5s' },
+        { fontSize: 14, x: 17,  y: -18, delay: '1s' },
+      ];
+      for (const d of zDefs) {
+        const z = document.createElement('span');
+        z.textContent = 'Z';
+        z.style.cssText = [
+          'position:absolute',
+          `font-size:${d.fontSize}px`,
+          'font-weight:bold',
+          'color:rgba(180,220,255,0.95)',
+          'text-shadow:0 1px 3px rgba(0,0,0,0.6)',
+          `left:${size * 0.45 + d.x}px`,
+          `top:${-size * 0.15 + d.y}px`,
+          `animation:f3d-zzz 2.4s ease-in-out ${d.delay} infinite`,
+        ].join(';');
+        zzz.appendChild(z);
+      }
+      wrapper.appendChild(zzz);
     }
 
     // Click action
@@ -5757,6 +5807,17 @@ export class Floor3dCard extends LitElement {
               }
             }
             el.title = marker.label || personState.attributes?.friendly_name || marker.id;
+          }
+        }
+
+        // Sleep indicator: show/hide Zzz overlay based on sleep_entity state
+        if (marker.sleep_entity) {
+          const zzzEl = el.querySelector('[data-zzz-overlay]') as HTMLElement | null;
+          if (zzzEl) {
+            const sleepState = hass.states[marker.sleep_entity];
+            const sleepStates = marker.sleep_states || ['on', 'sleeping', 'asleep'];
+            const isSleeping = sleepState && sleepStates.includes(sleepState.state);
+            zzzEl.style.display = isSleeping ? 'block' : 'none';
           }
         }
 

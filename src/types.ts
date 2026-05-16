@@ -81,6 +81,8 @@ export interface MarkerConfig {
   z_offset?: number;             // vertical offset in world units above anchor
   offset_x?: number;             // manual screen-space X offset in pixels (applied after auto-stacking)
   offset_y?: number;             // manual screen-space Y offset in pixels (applied after auto-stacking)
+  sleep_entity?: string;         // HA entity whose state indicates sleeping (e.g. binary_sensor.anas_sleeping)
+  sleep_states?: string[];       // states that mean "asleep" (default: ['on','sleeping','asleep'])
 }
 
 // ---------------------------------------------------------------------------
